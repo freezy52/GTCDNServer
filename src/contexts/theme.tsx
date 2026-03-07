@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 type Theme = "dark" | "light";
 
@@ -36,12 +36,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setTheme = (next: Theme) => setThemeState(next);
   const toggleTheme = () => setThemeState((t) => (t === "dark" ? "light" : "dark"));
+  const value = useMemo(() => ({ theme, toggleTheme, setTheme }), [theme]);
 
-  return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, setTheme }}>
-      {children}
-    </ThemeContext.Provider>
-  );
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
 // @note throws if used outside ThemeProvider

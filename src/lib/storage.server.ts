@@ -28,7 +28,7 @@ function getFolderChain(path: string) {
 }
 
 function sortEntries(entries: StorageObject[]) {
-  return [...entries].sort((a, b) => {
+  return entries.toSorted((a, b) => {
     if (a.isFolder !== b.isFolder) {
       return a.isFolder ? -1 : 1;
     }
