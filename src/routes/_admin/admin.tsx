@@ -13,6 +13,15 @@ import {
 
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
+import {
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalDescription,
+  ModalFooter,
+  ModalHeader,
+  ModalTitle,
+} from "@/components/ui/modal";
 import { authClient } from "@/lib/auth";
 import {
   changeAdminPasswordAction,
@@ -113,6 +122,7 @@ function AdminPage() {
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [movingFile, setMovingFile] = useState(false);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<StorageObject | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [folderModalOpen, setFolderModalOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
@@ -239,6 +249,10 @@ function AdminPage() {
     }
   }
 
+  function openDeleteModal(file: StorageObject) {
+    setDeleteTarget(file);
+  }
+
   async function handleSignOut() {
     await authClient.signOut();
     await router.navigate({ to: "/login" });
@@ -335,29 +349,33 @@ function AdminPage() {
         }}
       />
 
-      {(requiresPasswordChange || passwordModalOpen) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-2">
-                <h2 className="text-xl font-semibold text-foreground">
-                  {requiresPasswordChange ? "Change default password" : "Change password"}
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  {requiresPasswordChange
-                    ? "Your account is still using the default password. You must set a new password before continuing."
-                    : "Set a new password for the admin account."}
-                </p>
-              </div>
-
-              {!requiresPasswordChange && (
-                <Button type="button" variant="ghost" size="sm" onClick={() => setPasswordModalOpen(false)}>
-                  Close
-                </Button>
-              )}
+      <Modal
+        open={requiresPasswordChange || passwordModalOpen}
+        onOpenChange={setPasswordModalOpen}
+        dismissible={!requiresPasswordChange}
+      >
+        <ModalContent>
+          <ModalHeader>
+            <div className="space-y-2">
+              <ModalTitle>
+                {requiresPasswordChange ? "Change default password" : "Change password"}
+              </ModalTitle>
+              <ModalDescription>
+                {requiresPasswordChange
+                  ? "Your account is still using the default password. You must set a new password before continuing."
+                  : "Set a new password for the admin account."}
+              </ModalDescription>
             </div>
 
-            <form onSubmit={handlePasswordChange} className="mt-6 space-y-4">
+            {!requiresPasswordChange && (
+              <Button type="button" variant="ghost" size="sm" onClick={() => setPasswordModalOpen(false)}>
+                Close
+              </Button>
+            )}
+          </ModalHeader>
+
+          <form onSubmit={handlePasswordChange}>
+            <ModalBody>
               <div className="space-y-2">
                 <label htmlFor="new-password" className="block text-sm font-medium text-foreground">
                   New password
@@ -376,33 +394,35 @@ function AdminPage() {
               </div>
 
               {passwordError && <p className="text-sm text-destructive">{passwordError}</p>}
+            </ModalBody>
 
-              <Button type="submit" className="w-full" disabled={changingPassword}>
+            <ModalFooter className="justify-end">
+              <Button type="submit" disabled={changingPassword}>
                 {changingPassword ? "Updating password..." : "Update password"}
               </Button>
-            </form>
-          </div>
-        </div>
-      )}
+            </ModalFooter>
+          </form>
+        </ModalContent>
+      </Modal>
 
-      {folderModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-2">
-                <h2 className="text-xl font-semibold text-foreground">Create folder</h2>
-                <p className="text-sm text-muted-foreground">
-                  Create a folder in the current location. Nested names like `cache/images`
-                  also work.
-                </p>
-              </div>
-
-              <Button type="button" variant="ghost" size="sm" onClick={() => setFolderModalOpen(false)}>
-                Close
-              </Button>
+      <Modal open={folderModalOpen} onOpenChange={setFolderModalOpen}>
+        <ModalContent>
+          <ModalHeader>
+            <div className="space-y-2">
+              <ModalTitle>Create folder</ModalTitle>
+              <ModalDescription>
+                Create a folder in the current location. Nested names like `cache/images`
+                also work.
+              </ModalDescription>
             </div>
 
-            <form onSubmit={handleCreateFolder} className="mt-6 space-y-4">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setFolderModalOpen(false)}>
+              Close
+            </Button>
+          </ModalHeader>
+
+          <form onSubmit={handleCreateFolder}>
+            <ModalBody>
               <div className="space-y-2">
                 <label htmlFor="folder-name" className="block text-sm font-medium text-foreground">
                   Folder name
@@ -420,32 +440,34 @@ function AdminPage() {
               </div>
 
               {folderError && <p className="text-sm text-destructive">{folderError}</p>}
+            </ModalBody>
 
-              <Button type="submit" className="w-full" disabled={creatingFolder}>
+            <ModalFooter>
+              <Button type="submit" disabled={creatingFolder}>
                 {creatingFolder ? "Creating folder..." : "Create folder"}
               </Button>
-            </form>
-          </div>
-        </div>
-      )}
+            </ModalFooter>
+          </form>
+        </ModalContent>
+      </Modal>
 
-      {moveModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-2">
-                <h2 className="text-xl font-semibold text-foreground">Move file</h2>
-                <p className="text-sm text-muted-foreground">
-                  Choose the destination folder for `{moveFileKey?.split("/").pop()}`.
-                </p>
-              </div>
-
-              <Button type="button" variant="ghost" size="sm" onClick={() => setMoveModalOpen(false)}>
-                Close
-              </Button>
+      <Modal open={moveModalOpen} onOpenChange={setMoveModalOpen}>
+        <ModalContent>
+          <ModalHeader>
+            <div className="space-y-2">
+              <ModalTitle>Move file</ModalTitle>
+              <ModalDescription>
+                Choose the destination folder for `{moveFileKey?.split("/").pop()}`.
+              </ModalDescription>
             </div>
 
-            <form onSubmit={handleMoveFile} className="mt-6 space-y-4">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setMoveModalOpen(false)}>
+              Close
+            </Button>
+          </ModalHeader>
+
+          <form onSubmit={handleMoveFile}>
+            <ModalBody>
               <div className="space-y-2">
                 <label htmlFor="move-destination" className="block text-sm font-medium text-foreground">
                   Destination folder
@@ -465,14 +487,47 @@ function AdminPage() {
               </div>
 
               {moveError && <p className="text-sm text-destructive">{moveError}</p>}
+            </ModalBody>
 
-              <Button type="submit" className="w-full" disabled={movingFile}>
+            <ModalFooter>
+              <Button type="submit" disabled={movingFile}>
                 {movingFile ? "Moving file..." : "Move file"}
               </Button>
-            </form>
-          </div>
-        </div>
-      )}
+            </ModalFooter>
+          </form>
+        </ModalContent>
+      </Modal>
+
+      <Modal open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <ModalContent className="max-w-sm">
+          <ModalHeader className="block space-y-2">
+            <ModalTitle>Delete {deleteTarget?.isFolder ? "folder" : "file"}?</ModalTitle>
+            <ModalDescription>
+              {deleteTarget?.isFolder
+                ? `This will permanently remove ${deleteTarget.name} and all contents inside it.`
+                : `This will permanently remove ${deleteTarget?.name}.`}
+            </ModalDescription>
+          </ModalHeader>
+
+          <ModalFooter>
+            <Button type="button" variant="ghost" onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deletingKey === deleteTarget?.key}
+              onClick={async () => {
+                if (!deleteTarget) return;
+                await handleDelete(deleteTarget.key);
+                setDeleteTarget(null);
+              }}
+            >
+              {deletingKey === deleteTarget?.key ? "Deleting..." : "Delete"}
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
 
       <main className="mx-auto max-w-5xl px-6 py-10 space-y-8">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -678,7 +733,7 @@ function AdminPage() {
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    onClick={() => handleDelete(file.key)}
+                    onClick={() => openDeleteModal(file)}
                     disabled={deletingKey === file.key}
                     title={file.isFolder ? "Delete folder" : "Delete file"}
                     className="shrink-0 text-muted-foreground hover:text-destructive"
