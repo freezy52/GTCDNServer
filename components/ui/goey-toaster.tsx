@@ -15,7 +15,31 @@ export type {
 } from "goey-toast"
 
 function GoeyToaster(props: GoeyToasterProps) {
-  return <GoeyToasterPrimitive position="top-center" {...props} />
+  return (
+    <>
+      <GoeyToasterPrimitive position="top-center" {...props} />
+      <style jsx global>{`
+        .gooey-timestamp {
+          display: none !important;
+        }
+
+        [data-sonner-toast][data-x-position="left"] .gooey-description {
+          width: 100%;
+          text-align: left !important;
+        }
+
+        [data-sonner-toast][data-x-position="center"] .gooey-description {
+          width: 100%;
+          text-align: center !important;
+        }
+
+        [data-sonner-toast][data-x-position="right"] .gooey-description {
+          width: 100%;
+          text-align: right !important;
+        }
+      `}</style>
+    </>
+  )
 }
 
 export { GoeyToaster }

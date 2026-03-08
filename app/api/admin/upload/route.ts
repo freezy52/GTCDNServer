@@ -2,7 +2,11 @@ import { NextResponse } from "next/server"
 
 import { jsonError } from "@/lib/http"
 import { requireRequestSession } from "@/lib/session"
-import { uploadFile } from "@/lib/storage-server"
+import {
+  fileExists,
+  getAvailableUploadKey,
+  uploadFile,
+} from "@/lib/storage-server"
 
 export async function POST(request: Request) {
   try {
@@ -16,9 +20,26 @@ export async function POST(request: Request) {
 
     const path = ((formData.get("path") as string | null) ?? "").trim()
     const normalizedPath = path.replace(/^\/+|\/+$/g, "")
-    const key =
+    const baseKey =
       (formData.get("key") as string | null) ??
       `${normalizedPath ? `${normalizedPath}/` : ""}${file.name}`
+    const conflictAction = formData.get("conflictAction")
+
+    let key = baseKey
+
+    if (conflictAction === "rename") {
+      key = await getAvailableUploadKey(baseKey)
+    } else if (conflictAction !== "replace" && (await fileExists(baseKey))) {
+      return NextResponse.json(
+        {
+          error: "A file with the same name already exists in this folder.",
+          conflict: true,
+          key: baseKey,
+          suggestedKey: await getAvailableUploadKey(baseKey),
+        },
+        { status: 409 }
+      )
+    }
 
     const uploadedKey = await uploadFile(
       key,

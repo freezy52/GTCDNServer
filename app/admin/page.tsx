@@ -1,20 +1,24 @@
 "use client"
 
-import { motion } from "framer-motion"
+import { AnimatePresence, motion } from "framer-motion"
 import {
   ChevronRight,
   FileText,
   FolderOpen,
   FolderPlus,
   FolderTree,
+  MoreHorizontal,
   MoveRight,
-  Trash2,
   Upload,
 } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 
+import ChangePasswordModal from "@/components/layout/change-password-modal"
 import Navbar from "@/components/layout/navbar"
+import RenameFileModal from "@/components/layout/rename-file-modal"
+import RenameFolderModal from "@/components/layout/rename-folder-modal"
+import UploadConflictModal from "@/components/layout/upload-conflict-modal"
 import UploadModal from "@/components/layout/upload-modal"
 import { Button } from "@/components/ui/button"
 import { goeyToast } from "@/components/ui/goey-toaster"
@@ -27,100 +31,24 @@ import {
   ModalHeader,
   ModalTitle,
 } from "@/components/ui/modal"
-import { authClient, type Session } from "@/lib/auth-client"
+import { authClient } from "@/lib/auth-client"
+import {
+  type AdminPageData,
+  type UploadConflictAction,
+  type UploadConflictResponse,
+  type UploadedFileResult,
+  fetchJson,
+  formatBytes,
+  formatFolderLabel,
+  formatUploadedDate,
+  getFileNameFromKey,
+  getBreadcrumbs,
+  getParentPath,
+  getUploadSuccessDescription,
+  mergeUploadQueue,
+  normalizePath,
+} from "@/lib/admin-page"
 import type { FolderOption, StorageObject } from "@/lib/storage"
-
-type AdminPageData = {
-  currentPath: string
-  files: StorageObject[]
-  requiresPasswordChange: boolean
-  session: Session
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B"
-  const k = 1024
-  const sizes = ["B", "KB", "MB", "GB"]
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
-}
-
-function formatUploadedDate(value: string, useLocalTime: boolean) {
-  return new Intl.DateTimeFormat(useLocalTime ? undefined : "en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: useLocalTime ? undefined : "UTC",
-  }).format(new Date(value))
-}
-
-function normalizePath(path: string) {
-  return path.trim().replace(/^\/+|\/+$/g, "")
-}
-
-function getParentPath(path: string) {
-  const normalized = normalizePath(path)
-  if (!normalized) return ""
-
-  const parts = normalized.split("/")
-  parts.pop()
-  return parts.join("/")
-}
-
-function getBreadcrumbs(path: string) {
-  const normalized = normalizePath(path)
-  if (!normalized) return [] as Array<{ label: string; path: string }>
-
-  const parts = normalized.split("/")
-  return parts.map((part, index) => ({
-    label: part,
-    path: parts.slice(0, index + 1).join("/"),
-  }))
-}
-
-function formatFolderLabel(folder: FolderOption) {
-  return folder.key ? folder.name : "/"
-}
-
-function mergeUploadQueue(current: File[], incoming: File[]) {
-  const merged = [...current]
-
-  for (const file of incoming) {
-    const exists = merged.some(
-      (item) =>
-        item.name === file.name &&
-        item.size === file.size &&
-        item.lastModified === file.lastModified
-    )
-
-    if (!exists) {
-      merged.push(file)
-    }
-  }
-
-  return merged
-}
-
-async function fetchJson<T>(
-  input: RequestInfo,
-  init?: RequestInit
-): Promise<T> {
-  const response = await fetch(input, {
-    cache: "no-store",
-    ...init,
-  })
-
-  if (!response.ok) {
-    const errorBody = (await response.json().catch(() => null)) as {
-      error?: string
-    } | null
-    throw new Error(errorBody?.error || "Request failed")
-  }
-
-  return response.json() as Promise<T>
-}
 
 function AdminPageContent() {
   const ITEMS_PER_PAGE = 20
@@ -149,6 +77,7 @@ function AdminPageContent() {
   const [movingFile, setMovingFile] = useState(false)
   const [deletingKey, setDeletingKey] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<StorageObject | null>(null)
+  const [fileActionsKey, setFileActionsKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [page, setPage] = useState(1)
@@ -159,15 +88,35 @@ function AdminPageContent() {
   const [uploadDestination, setUploadDestination] = useState("")
   const [uploadQueue, setUploadQueue] = useState<File[]>([])
   const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadConflict, setUploadConflict] = useState<{
+    file: File
+    destinationPath: string
+    existingKey: string
+    suggestedKey: string
+  } | null>(null)
   const [moveModalOpen, setMoveModalOpen] = useState(false)
   const [moveFileKey, setMoveFileKey] = useState<string | null>(null)
   const [moveDestination, setMoveDestination] = useState("")
   const [moveError, setMoveError] = useState<string | null>(null)
+  const [renameTarget, setRenameTarget] = useState<StorageObject | null>(null)
+  const [renameName, setRenameName] = useState("")
+  const [renameError, setRenameError] = useState<string | null>(null)
+  const [renamingFile, setRenamingFile] = useState(false)
+  const [renameFolderTarget, setRenameFolderTarget] =
+    useState<StorageObject | null>(null)
+  const [renameFolderName, setRenameFolderName] = useState("")
+  const [renameFolderError, setRenameFolderError] = useState<string | null>(
+    null
+  )
+  const [renamingFolder, setRenamingFolder] = useState(false)
   const [passwordModalOpen, setPasswordModalOpen] = useState(false)
   const [newPassword, setNewPassword] = useState("")
   const [changingPassword, setChangingPassword] = useState(false)
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const uploadConflictResolverRef = useRef<
+    ((action: UploadConflictAction | "cancel") => void) | null
+  >(null)
 
   useEffect(() => {
     void (async () => {
@@ -200,6 +149,28 @@ function AdminPageContent() {
   useEffect(() => {
     setUseLocalTime(true)
   }, [])
+
+  useEffect(() => {
+    if (!fileActionsKey) return
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target
+
+      if (
+        target instanceof HTMLElement &&
+        target.closest("[data-file-actions='true']")
+      ) {
+        return
+      }
+
+      setFileActionsKey(null)
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown)
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown)
+    }
+  }, [fileActionsKey])
 
   const breadcrumbs = getBreadcrumbs(currentPath)
   const filteredFiles = useMemo(() => {
@@ -247,6 +218,66 @@ function AdminPageContent() {
     return uploadFilesToPath(filesToUpload, currentPath)
   }
 
+  async function requestUpload(
+    file: File,
+    destinationPath: string,
+    conflictAction?: UploadConflictAction
+  ) {
+    const body = new FormData()
+    body.append("file", file)
+    body.append("path", destinationPath)
+
+    if (conflictAction) {
+      body.append("conflictAction", conflictAction)
+    }
+
+    const response = await fetch("/api/admin/upload", {
+      method: "POST",
+      body,
+      cache: "no-store",
+    })
+
+    const payload = (await response.json().catch(() => null)) as
+      | { error?: string; key?: string }
+      | UploadConflictResponse
+      | null
+
+    if (response.ok) {
+      return {
+        ok: true as const,
+        key: payload && "key" in payload ? payload.key ?? "" : "",
+      }
+    }
+
+    if (response.status === 409 && payload?.conflict) {
+      return {
+        ok: false as const,
+        conflict: payload,
+      }
+    }
+
+    throw new Error(payload?.error || "Upload failed")
+  }
+
+  function waitForUploadConflictResolution(conflict: {
+    file: File
+    destinationPath: string
+    existingKey: string
+    suggestedKey: string
+  }) {
+    setUploadConflict(conflict)
+
+    return new Promise<UploadConflictAction | "cancel">((resolve) => {
+      uploadConflictResolverRef.current = resolve
+    })
+  }
+
+  function resolveUploadConflict(action: UploadConflictAction | "cancel") {
+    uploadConflictResolverRef.current?.(action)
+    uploadConflictResolverRef.current = null
+    setUploadConflict(null)
+  }
+
   async function uploadFilesToPath(
     filesToUpload: File[],
     destinationPath: string
@@ -258,11 +289,38 @@ function AdminPageContent() {
     setUploadProgress(0)
 
     try {
+      const uploadedFiles: UploadedFileResult[] = []
+
       for (const [index, file] of filesToUpload.entries()) {
-        const body = new FormData()
-        body.append("file", file)
-        body.append("path", destinationPath)
-        await fetchJson("/api/admin/upload", { method: "POST", body })
+        let uploadResult = await requestUpload(file, destinationPath)
+
+        if (!uploadResult.ok) {
+          setUploading(false)
+
+          const action = await waitForUploadConflictResolution({
+            file,
+            destinationPath,
+            existingKey: uploadResult.conflict.key,
+            suggestedKey: uploadResult.conflict.suggestedKey,
+          })
+
+          if (action === "cancel") {
+            return false
+          }
+
+          setUploading(true)
+          uploadResult = await requestUpload(file, destinationPath, action)
+
+          if (!uploadResult.ok) {
+            throw new Error(uploadResult.conflict.error)
+          }
+        }
+
+        uploadedFiles.push({
+          originalName: file.name,
+          uploadedName: getFileNameFromKey(uploadResult.key),
+        })
+
         setUploadProgress(
           Math.round(((index + 1) / filesToUpload.length) * 100)
         )
@@ -270,10 +328,7 @@ function AdminPageContent() {
 
       await refresh()
       goeyToast.success("Upload completed.", {
-        description:
-          filesToUpload.length === 1
-            ? `"${filesToUpload[0]?.name}" has been uploaded successfully.`
-            : `${filesToUpload.length} files has been upload successfully.`,
+        description: getUploadSuccessDescription(uploadedFiles),
       })
       return true
     } catch (err) {
@@ -305,6 +360,7 @@ function AdminPageContent() {
     setError(null)
     setUploadQueue([])
     setUploadProgress(0)
+    setUploadConflict(null)
     setUploadDestination(currentPath)
     await loadFolders()
     setUploadModalOpen(true)
@@ -380,6 +436,20 @@ function AdminPageContent() {
     } finally {
       setDeletingKey(null)
     }
+  }
+
+  function openRenameModal(file: StorageObject) {
+    setRenameTarget(file)
+    setRenameName(file.name)
+    setRenameError(null)
+    setFileActionsKey(null)
+  }
+
+  function openRenameFolderModal(folder: StorageObject) {
+    setRenameFolderTarget(folder)
+    setRenameFolderName(folder.name)
+    setRenameFolderError(null)
+    setFileActionsKey(null)
   }
 
   async function handleSignOut() {
@@ -485,6 +555,71 @@ function AdminPageContent() {
     }
   }
 
+  async function handleRenameFile(event: React.FormEvent) {
+    event.preventDefault()
+    if (!renameTarget) return
+
+    setRenameError(null)
+    setRenamingFile(true)
+
+    try {
+      await fetchJson<{ key: string }>("/api/admin/rename", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sourceKey: renameTarget.key,
+          nextName: renameName,
+        }),
+      })
+      await refresh()
+      goeyToast.success("File renamed.", {
+        description: `"${renameTarget.name}" is now "${renameName.trim()}".`,
+      })
+      setRenameTarget(null)
+      setRenameName("")
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to rename file"
+      setRenameError(message)
+      goeyToast.error(message)
+    } finally {
+      setRenamingFile(false)
+    }
+  }
+
+  async function handleRenameFolder(event: React.FormEvent) {
+    event.preventDefault()
+    if (!renameFolderTarget) return
+
+    setRenameFolderError(null)
+    setRenamingFolder(true)
+
+    try {
+      await fetchJson<{ key: string }>("/api/admin/folders", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sourceKey: renameFolderTarget.key,
+          nextName: renameFolderName,
+        }),
+      })
+      await refresh()
+      await loadFolders()
+      goeyToast.success("Folder renamed.", {
+        description: `"${renameFolderTarget.name}" is now "${renameFolderName.trim()}".`,
+      })
+      setRenameFolderTarget(null)
+      setRenameFolderName("")
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to rename folder"
+      setRenameFolderError(message)
+      goeyToast.error(message)
+    } finally {
+      setRenamingFolder(false)
+    }
+  }
+
   if (loadingPage || !data) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -504,72 +639,16 @@ function AdminPageContent() {
         }}
       />
 
-      <Modal
+      <ChangePasswordModal
         open={requiresPasswordChange || passwordModalOpen}
+        requiresPasswordChange={requiresPasswordChange}
+        newPassword={newPassword}
+        changingPassword={changingPassword}
+        passwordError={passwordError}
         onOpenChange={setPasswordModalOpen}
-        dismissible={!requiresPasswordChange}
-      >
-        <ModalContent>
-          <ModalHeader>
-            <div className="space-y-2">
-              <ModalTitle>
-                {requiresPasswordChange
-                  ? "Change default password"
-                  : "Change password"}
-              </ModalTitle>
-              <ModalDescription>
-                {requiresPasswordChange
-                  ? "Your account is still using the default password. You must set a new password before continuing."
-                  : "Set a new password for the admin account."}
-              </ModalDescription>
-            </div>
-
-            {!requiresPasswordChange ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setPasswordModalOpen(false)}
-              >
-                Close
-              </Button>
-            ) : null}
-          </ModalHeader>
-
-          <form onSubmit={handlePasswordChange}>
-            <ModalBody>
-              <div className="space-y-2">
-                <label
-                  htmlFor="new-password"
-                  className="block text-sm font-medium text-foreground"
-                >
-                  New password
-                </label>
-                <input
-                  id="new-password"
-                  type="password"
-                  required
-                  minLength={8}
-                  value={newPassword}
-                  onChange={(event) => setNewPassword(event.target.value)}
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground transition-colors outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/50"
-                  placeholder="Enter a new password"
-                />
-              </div>
-
-              {passwordError ? (
-                <p className="text-sm text-destructive">{passwordError}</p>
-              ) : null}
-            </ModalBody>
-
-            <ModalFooter className="justify-end">
-              <Button type="submit" disabled={changingPassword}>
-                {changingPassword ? "Updating password..." : "Update password"}
-              </Button>
-            </ModalFooter>
-          </form>
-        </ModalContent>
-      </Modal>
+        onNewPasswordChange={setNewPassword}
+        onSubmit={handlePasswordChange}
+      />
 
       <Modal open={folderModalOpen} onOpenChange={setFolderModalOpen}>
         <ModalContent>
@@ -628,7 +707,13 @@ function AdminPageContent() {
 
       <UploadModal
         open={uploadModalOpen}
-        onOpenChange={setUploadModalOpen}
+        onOpenChange={(open) => {
+          setUploadModalOpen(open)
+
+          if (!open) {
+            resolveUploadConflict("cancel")
+          }
+        }}
         folders={folders}
         uploadDestination={uploadDestination}
         onUploadDestinationChange={setUploadDestination}
@@ -641,6 +726,47 @@ function AdminPageContent() {
         onSubmit={handleUploadSubmit}
         formatFolderLabel={formatFolderLabel}
         formatBytes={formatBytes}
+      />
+
+      <UploadConflictModal
+        open={!!uploadConflict}
+        fileName={getFileNameFromKey(uploadConflict?.existingKey ?? "")}
+        suggestedName={getFileNameFromKey(uploadConflict?.suggestedKey ?? "")}
+        onCancel={() => resolveUploadConflict("cancel")}
+        onRename={() => resolveUploadConflict("rename")}
+        onReplace={() => resolveUploadConflict("replace")}
+      />
+
+      <RenameFileModal
+        open={!!renameTarget}
+        currentName={renameTarget?.name ?? ""}
+        nextName={renameName}
+        renameError={renameError}
+        renaming={renamingFile}
+        onOpenChange={(open) => {
+          if (open) return
+          setRenameTarget(null)
+          setRenameName("")
+          setRenameError(null)
+        }}
+        onNextNameChange={setRenameName}
+        onSubmit={handleRenameFile}
+      />
+
+      <RenameFolderModal
+        open={!!renameFolderTarget}
+        currentName={renameFolderTarget?.name ?? ""}
+        nextName={renameFolderName}
+        renameError={renameFolderError}
+        renaming={renamingFolder}
+        onOpenChange={(open) => {
+          if (open) return
+          setRenameFolderTarget(null)
+          setRenameFolderName("")
+          setRenameFolderError(null)
+        }}
+        onNextNameChange={setRenameFolderName}
+        onSubmit={handleRenameFolder}
       />
 
       <Modal open={moveModalOpen} onOpenChange={setMoveModalOpen}>
@@ -1008,28 +1134,117 @@ function AdminPageContent() {
                   </div>
 
                   {!file.isFolder ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => openMoveModal(file.key)}
-                      title="Move file"
-                      className="shrink-0 text-muted-foreground hover:text-foreground md:hidden"
-                    >
-                      <MoveRight className="size-3.5" />
-                    </Button>
-                  ) : null}
+                    <>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => openMoveModal(file.key)}
+                        title="Move file"
+                        className="shrink-0 text-muted-foreground hover:text-foreground md:hidden"
+                      >
+                        <MoveRight className="size-3.5" />
+                      </Button>
 
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => setDeleteTarget(file)}
-                    disabled={deletingKey === file.key}
-                    title={file.isFolder ? "Delete folder" : "Delete file"}
-                    className="shrink-0 text-muted-foreground hover:text-destructive"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
+                      <div
+                        className="relative shrink-0"
+                        data-file-actions="true"
+                      >
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() =>
+                            setFileActionsKey((current) =>
+                              current === file.key ? null : file.key
+                            )
+                          }
+                          title="File actions"
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <MoreHorizontal className="size-3.5" />
+                        </Button>
+
+                        <AnimatePresence>
+                          {fileActionsKey === file.key ? (
+                            <motion.div
+                              className="absolute right-0 top-full z-20 mt-2 w-40 rounded-xl border border-border bg-popover p-1 shadow-lg"
+                              initial={{ opacity: 0, y: -6, scale: 0.96 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                              transition={{ duration: 0.16, ease: "easeOut" }}
+                            >
+                              <button
+                                type="button"
+                                className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-popover-foreground transition-colors hover:bg-muted"
+                                onClick={() => openRenameModal(file)}
+                              >
+                                Rename file
+                              </button>
+                              <button
+                                type="button"
+                                className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10"
+                                onClick={() => {
+                                  setDeleteTarget(file)
+                                  setFileActionsKey(null)
+                                }}
+                              >
+                                Remove
+                              </button>
+                            </motion.div>
+                          ) : null}
+                        </AnimatePresence>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="relative shrink-0" data-file-actions="true">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() =>
+                          setFileActionsKey((current) =>
+                            current === file.key ? null : file.key
+                          )
+                        }
+                        disabled={deletingKey === file.key}
+                        title="Folder actions"
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <MoreHorizontal className="size-3.5" />
+                      </Button>
+
+                      <AnimatePresence>
+                        {fileActionsKey === file.key ? (
+                          <motion.div
+                            className="absolute right-0 top-full z-20 mt-2 w-40 rounded-xl border border-border bg-popover p-1 shadow-lg"
+                            initial={{ opacity: 0, y: -6, scale: 0.96 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                            transition={{ duration: 0.16, ease: "easeOut" }}
+                          >
+                            <button
+                              type="button"
+                              className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-popover-foreground transition-colors hover:bg-muted"
+                              onClick={() => openRenameFolderModal(file)}
+                            >
+                              Rename folder
+                            </button>
+                            <button
+                              type="button"
+                              className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10"
+                              onClick={() => {
+                                setDeleteTarget(file)
+                                setFileActionsKey(null)
+                              }}
+                            >
+                              Remove
+                            </button>
+                          </motion.div>
+                        ) : null}
+                      </AnimatePresence>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

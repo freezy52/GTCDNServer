@@ -32,7 +32,7 @@ export default function RootLayout({
       lang="en"
       suppressHydrationWarning
       className={cn(
-        "dark antialiased",
+        "antialiased",
         fontMono.variable,
         "font-sans",
         fontSans.variable
@@ -41,7 +41,7 @@ export default function RootLayout({
       <body>
         <ThemeProvider
           attribute="class"
-          defaultTheme="dark"
+          defaultTheme="light"
           enableSystem={false}
         >
           {children}

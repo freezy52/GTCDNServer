@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 import { jsonError } from "@/lib/http"
 import { requireRequestSession } from "@/lib/session"
-import { createFolder, listFolders } from "@/lib/storage-server"
+import { createFolder, listFolders, renameFolder } from "@/lib/storage-server"
 
 export async function GET(request: Request) {
   try {
@@ -29,6 +29,33 @@ export async function POST(request: Request) {
 
     const key = `${currentPath ? `${currentPath}/` : ""}${folderName}/`
     await createFolder(key)
+    return NextResponse.json({ key })
+  } catch (error) {
+    return jsonError(error, 400)
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    await requireRequestSession(request)
+    const body = (await request.json()) as {
+      sourceKey?: string
+      nextName?: string
+    }
+
+    if (!body.sourceKey) {
+      return jsonError("Missing folder", 400)
+    }
+
+    if (!body.sourceKey.endsWith("/")) {
+      return jsonError("Only folders can be renamed here", 400)
+    }
+
+    if (!body.nextName?.trim()) {
+      return jsonError("Missing folder name", 400)
+    }
+
+    const key = await renameFolder(body.sourceKey, body.nextName)
     return NextResponse.json({ key })
   } catch (error) {
     return jsonError(error, 400)

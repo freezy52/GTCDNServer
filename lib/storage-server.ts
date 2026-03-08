@@ -141,6 +141,57 @@ async function resolveUploadKey(client: S3Client, bucket: string, key: string) {
   }
 }
 
+async function listAllObjectKeys(client: S3Client, bucket: string, prefix: string) {
+  const keys: string[] = []
+  let continuationToken: string | undefined
+
+  while (true) {
+    const listed = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: normalizePrefix(prefix),
+        ContinuationToken: continuationToken,
+      })
+    )
+
+    keys.push(
+      ...(listed.Contents ?? [])
+        .map((item) => item.Key)
+        .filter((item): item is string => Boolean(item))
+    )
+
+    if (!listed.IsTruncated) {
+      break
+    }
+
+    continuationToken = listed.NextContinuationToken
+  }
+
+  return keys
+}
+
+async function prefixExists(client: S3Client, bucket: string, prefix: string) {
+  const listed = await client.send(
+    new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: normalizePrefix(prefix),
+      MaxKeys: 1,
+    })
+  )
+
+  return (listed.Contents?.length ?? 0) > 0
+}
+
+export async function fileExists(key: string) {
+  const { bucket, client } = await getStorageClient()
+  return keyExists(client, bucket, key)
+}
+
+export async function getAvailableUploadKey(key: string) {
+  const { bucket, client } = await getStorageClient()
+  return resolveUploadKey(client, bucket, key)
+}
+
 export async function listFiles(prefix = ""): Promise<StorageObject[]> {
   const normalizedPrefix = normalizePrefix(prefix)
   const { bucket, client } = await getStorageClient()
@@ -227,17 +278,16 @@ export async function uploadFile(
 ): Promise<string> {
   const { bucket, client } = await getStorageClient()
   const payload = body instanceof ArrayBuffer ? new Uint8Array(body) : body
-  const resolvedKey = await resolveUploadKey(client, bucket, key)
   await client.send(
     new PutObjectCommand({
       Bucket: bucket,
-      Key: resolvedKey,
+      Key: key,
       Body: payload,
       ContentType: contentType,
     })
   )
-  await upsertFolders(getFolderChain(resolvedKey))
-  return resolvedKey
+  await upsertFolders(getFolderChain(key))
+  return key
 }
 
 export async function createFolder(key: string): Promise<void> {
@@ -345,4 +395,134 @@ export async function moveFile(
   await upsertFolders(getFolderChain(nextKey))
 
   return nextKey
+}
+
+export async function renameFile(
+  sourceKey: string,
+  nextName: string
+): Promise<string> {
+  const trimmedName = nextName.trim()
+  if (!trimmedName) {
+    throw new Error("Missing file name")
+  }
+
+  if (trimmedName.includes("/")) {
+    throw new Error("File name cannot include slashes")
+  }
+
+  const slashIndex = sourceKey.lastIndexOf("/")
+  const prefix = slashIndex >= 0 ? sourceKey.slice(0, slashIndex + 1) : ""
+  const nextKey = `${prefix}${trimmedName}`
+
+  if (nextKey === sourceKey) {
+    throw new Error("File already has that name")
+  }
+
+  const { bucket, client } = await getStorageClient()
+
+  if (await keyExists(client, bucket, nextKey)) {
+    throw new Error("A file with that name already exists")
+  }
+
+  const object = await client.send(
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: sourceKey,
+    })
+  )
+
+  if (!object.Body) {
+    throw new Error("File not found")
+  }
+
+  await client.send(
+    new CopyObjectCommand({
+      Bucket: bucket,
+      Key: nextKey,
+      CopySource: encodeCopySource(bucket, sourceKey),
+      ContentType: object.ContentType || "application/octet-stream",
+      MetadataDirective: "REPLACE",
+    })
+  )
+
+  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: sourceKey }))
+
+  return nextKey
+}
+
+export async function renameFolder(
+  sourceKey: string,
+  nextName: string
+): Promise<string> {
+  const sourcePrefix = normalizePrefix(sourceKey)
+  const trimmedName = nextName.trim().replace(/^\/+|\/+$/g, "")
+
+  if (!sourcePrefix) {
+    throw new Error("Missing folder")
+  }
+
+  if (!trimmedName) {
+    throw new Error("Missing folder name")
+  }
+
+  if (trimmedName.includes("/")) {
+    throw new Error("Folder name cannot include slashes")
+  }
+
+  const sourceParts = sourcePrefix.split("/").filter(Boolean)
+  sourceParts.pop()
+  const parentPrefix = sourceParts.length > 0 ? `${sourceParts.join("/")}/` : ""
+  const nextPrefix = `${parentPrefix}${trimmedName}/`
+
+  if (nextPrefix === sourcePrefix) {
+    throw new Error("Folder already has that name")
+  }
+
+  const { bucket, client } = await getStorageClient()
+
+  if (await prefixExists(client, bucket, nextPrefix)) {
+    throw new Error("A folder with that name already exists")
+  }
+
+  const objectKeys = await listAllObjectKeys(client, bucket, sourcePrefix)
+
+  if (objectKeys.length === 0) {
+    throw new Error("Folder not found")
+  }
+
+  const nextFolderPaths = new Set<string>()
+
+  for (const key of objectKeys) {
+    const renamedKey = `${nextPrefix}${key.slice(sourcePrefix.length)}`
+
+    await client.send(
+      new CopyObjectCommand({
+        Bucket: bucket,
+        Key: renamedKey,
+        CopySource: encodeCopySource(bucket, key),
+        MetadataDirective: "COPY",
+      })
+    )
+
+    nextFolderPaths.add(renamedKey)
+  }
+
+  await client.send(
+    new DeleteObjectsCommand({
+      Bucket: bucket,
+      Delete: {
+        Objects: objectKeys.map((key) => ({ Key: key })),
+        Quiet: true,
+      },
+    })
+  )
+
+  await removeFoldersByPrefix(sourcePrefix)
+  await upsertFolders([
+    ...new Set(
+      [...nextFolderPaths].flatMap((key) => getFolderChain(key).concat(nextPrefix))
+    ),
+  ])
+
+  return nextPrefix
 }
