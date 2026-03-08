@@ -1,5 +1,5 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronRight,
   FileText,
@@ -100,10 +100,30 @@ function getBreadcrumbs(path: string) {
 }
 
 function formatFolderLabel(folder: FolderOption) {
-  return folder.key ? folder.name : "Root";
+  return folder.key ? folder.name : "/";
+}
+
+function mergeUploadQueue(current: File[], incoming: File[]) {
+  const merged = [...current];
+
+  for (const file of incoming) {
+    const exists = merged.some(
+      (item) =>
+        item.name === file.name &&
+        item.size === file.size &&
+        item.lastModified === file.lastModified,
+    );
+
+    if (!exists) {
+      merged.push(file);
+    }
+  }
+
+  return merged;
 }
 
 function AdminPage() {
+  const ITEMS_PER_PAGE = 20;
   const router = useRouter();
   const data = Route.useLoaderData();
 
@@ -120,9 +140,15 @@ function AdminPage() {
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<StorageObject | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(1);
   const [folderModalOpen, setFolderModalOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [folderError, setFolderError] = useState<string | null>(null);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [uploadDestination, setUploadDestination] = useState("");
+  const [uploadQueue, setUploadQueue] = useState<File[]>([]);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [moveModalOpen, setMoveModalOpen] = useState(false);
   const [moveFileKey, setMoveFileKey] = useState<string | null>(null);
   const [moveDestination, setMoveDestination] = useState("");
@@ -141,8 +167,28 @@ function AdminPage() {
     setRequiresPasswordChange(data.requiresPasswordChange);
   }, [data.requiresPasswordChange]);
 
+  useEffect(() => {
+    setSearchQuery("");
+    setPage(1);
+  }, [data.currentPath]);
+
   const currentPath = normalizePath(data.currentPath);
   const breadcrumbs = getBreadcrumbs(currentPath);
+  const filteredFiles = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return files;
+
+    return files.filter((file) => file.name.toLowerCase().includes(query));
+  }, [files, searchQuery]);
+  const totalPages = Math.max(1, Math.ceil(filteredFiles.length / ITEMS_PER_PAGE));
+  const paginatedFiles = useMemo(() => {
+    const start = (page - 1) * ITEMS_PER_PAGE;
+    return filteredFiles.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredFiles, page]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
 
   async function refresh() {
     const nextFiles = await listFilesAction({ data: currentPath });
@@ -163,32 +209,35 @@ function AdminPage() {
   }
 
   async function uploadFiles(filesToUpload: File[]) {
-    if (filesToUpload.length === 0) return;
+    return uploadFilesToPath(filesToUpload, currentPath);
+  }
+
+  async function uploadFilesToPath(filesToUpload: File[], destinationPath: string) {
+    if (filesToUpload.length === 0) return false;
 
     setError(null);
     setUploading(true);
+    setUploadProgress(0);
 
     try {
-      for (const file of filesToUpload) {
+      for (const [index, file] of filesToUpload.entries()) {
         const body = new FormData();
         body.append("file", file);
-        body.append("path", currentPath);
+        body.append("path", destinationPath);
         await uploadFileAction({ data: body });
+        setUploadProgress(Math.round(((index + 1) / filesToUpload.length) * 100));
       }
 
       await refresh();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
+      return false;
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
       setDragActive(false);
     }
-  }
-
-  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const nextFiles = Array.from(e.target.files ?? []);
-    await uploadFiles(nextFiles);
   }
 
   async function handleDrop(e: React.DragEvent<HTMLDivElement>) {
@@ -202,6 +251,36 @@ function AdminPage() {
 
     const droppedFiles = Array.from(e.dataTransfer.files ?? []);
     await uploadFiles(droppedFiles);
+  }
+
+  async function openUploadModal() {
+    setError(null);
+    setUploadQueue([]);
+    setUploadProgress(0);
+    setUploadDestination(currentPath);
+    await loadFolders();
+    setUploadModalOpen(true);
+  }
+
+  function handleUploadQueueChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const nextFiles = Array.from(e.target.files ?? []);
+    if (nextFiles.length === 0) return;
+
+    setUploadQueue((current) => mergeUploadQueue(current, nextFiles));
+    e.target.value = "";
+  }
+
+  function removeUploadQueueItem(fileToRemove: File) {
+    setUploadQueue((current) =>
+      current.filter(
+        (file) =>
+          !(
+            file.name === fileToRemove.name &&
+            file.size === fileToRemove.size &&
+            file.lastModified === fileToRemove.lastModified
+          ),
+      ),
+    );
   }
 
   async function handleMoveToFolder(destinationKey: string) {
@@ -265,6 +344,14 @@ function AdminPage() {
     setFolderError(null);
     setFolderName("");
     setFolderModalOpen(true);
+  }
+
+  async function handleUploadSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const ok = await uploadFilesToPath(uploadQueue, uploadDestination);
+    if (!ok) return;
+    setUploadQueue([]);
+    setUploadModalOpen(false);
   }
 
   async function openMoveModal(fileKey: string) {
@@ -464,6 +551,111 @@ function AdminPage() {
         </ModalContent>
       </Modal>
 
+      <Modal open={uploadModalOpen} onOpenChange={setUploadModalOpen}>
+        <ModalContent>
+          <ModalHeader>
+            <div className="space-y-2">
+              <ModalTitle>Upload files</ModalTitle>
+              <ModalDescription>
+                Choose files, then select which folder should receive them before starting the upload.
+              </ModalDescription>
+            </div>
+
+            <Button type="button" variant="ghost" size="sm" onClick={() => setUploadModalOpen(false)}>
+              Close
+            </Button>
+          </ModalHeader>
+
+          <form onSubmit={handleUploadSubmit}>
+            <ModalBody>
+              <div className="space-y-2">
+                <label htmlFor="upload-destination" className="block text-sm font-medium text-foreground">
+                  Destination folder
+                </label>
+                <select
+                  id="upload-destination"
+                  value={uploadDestination}
+                  onChange={(e) => setUploadDestination(e.target.value)}
+                  className="border-input bg-background text-foreground focus:border-ring focus:ring-ring/50 w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:ring-2"
+                  disabled={uploading}
+                >
+                  {folders.map((folder) => (
+                    <option key={folder.key || "root"} value={folder.key.slice(0, -1)}>
+                      {formatFolderLabel(folder)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="upload-files" className="block text-sm font-medium text-foreground">
+                  Files
+                </label>
+                <input
+                  id="upload-files"
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  onChange={handleUploadQueueChange}
+                  className="border-input bg-background text-foreground file:bg-muted file:text-foreground file:mr-3 file:rounded-md file:border-0 file:px-3 file:py-2 w-full rounded-lg border px-3 py-2 text-sm outline-none"
+                  disabled={uploading}
+                />
+                {uploadQueue.length > 0 && (
+                  <div className="space-y-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
+                    <p className="text-sm text-muted-foreground">
+                      {uploadQueue.length} file{uploadQueue.length === 1 ? "" : "s"} selected
+                    </p>
+                    <div className="upload-queue-scroll max-h-40 space-y-2 overflow-auto pr-1">
+                      {uploadQueue.map((file) => (
+                        <div
+                          key={`${file.name}-${file.size}-${file.lastModified}`}
+                          className="flex items-center justify-between gap-3 rounded-md bg-background/70 px-2 py-1.5 text-sm"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-foreground">{file.name}</p>
+                            <p className="text-xs text-muted-foreground">{formatBytes(file.size)}</p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => removeUploadQueueItem(file)}
+                            disabled={uploading}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {uploading && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm text-muted-foreground">
+                    <span>Uploading</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-primary transition-[width] duration-300"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </ModalBody>
+
+            <ModalFooter>
+              <Button type="submit" disabled={uploading || uploadQueue.length === 0}>
+                {uploading ? "Uploading..." : "Continue Upload"}
+              </Button>
+            </ModalFooter>
+          </form>
+        </ModalContent>
+      </Modal>
+
       <Modal open={moveModalOpen} onOpenChange={setMoveModalOpen}>
         <ModalContent>
           <ModalHeader>
@@ -568,7 +760,7 @@ function AdminPage() {
                   await handleMoveToFolder("");
                 }}
               >
-                Root
+                /
               </button>
               {breadcrumbs.map((crumb) => (
                 <div key={crumb.path} className="flex items-center gap-2">
@@ -601,37 +793,18 @@ function AdminPage() {
             <div>
               <h1 className="text-xl font-semibold text-foreground">File Manager</h1>
               <p className="text-sm text-muted-foreground mt-0.5">
-                {currentPath ? `Inside ${currentPath}` : "Root directory"} - {files.length}{" "}
-                {files.length === 1 ? "item" : "items"}
+                {currentPath ? `Inside ${currentPath}` : "Root directory"} - {filteredFiles.length}{" "}
+                {filteredFiles.length === 1 ? "item" : "items"}
               </p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {currentPath && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => navigateToPath(getParentPath(currentPath))}
-              >
-                <FolderOpen className="size-3.5" />
-                Up One Level
-              </Button>
-            )}
             <Button type="button" variant="outline" size="sm" onClick={openFolderModal}>
               <FolderPlus className="size-3.5" />
               New Folder
             </Button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={handleUpload}
-              disabled={uploading}
-            />
-            <Button onClick={() => fileInputRef.current?.click()} disabled={uploading} size="sm">
+            <Button onClick={openUploadModal} disabled={uploading} size="sm">
               <Upload className="size-3.5" />
               {uploading ? "Uploading..." : "Upload"}
             </Button>
@@ -658,22 +831,65 @@ function AdminPage() {
           }}
           onDrop={handleDrop}
         >
-          <div className="border-b border-border px-4 py-3 text-sm text-muted-foreground">
-            Drag and drop files here to upload into{" "}
-            {currentPath ? `${currentPath}/` : "the root folder"}.
+          <div className="border-b border-border px-4 py-3">
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Search files and folders"
+              className="border-input bg-background text-foreground placeholder:text-muted-foreground focus:border-ring focus:ring-ring/50 w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:ring-2"
+            />
           </div>
-
-          {files.length === 0 ? (
+          {filteredFiles.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 px-6 py-20 text-muted-foreground">
               <FolderOpen className="size-8 opacity-40" />
-              <p className="text-sm">This folder is empty. Upload files or create a new folder.</p>
+              <p className="text-sm">
+                {searchQuery ? "No items match your search." : "This folder is empty. Upload files or create a new folder."}
+              </p>
             </div>
           ) : (
             <div className="overflow-hidden">
-              {files.map((file, index) => (
+              {currentPath && page === 1 && !searchQuery && (
+                <div
+                  className={`px-4 py-3 ${paginatedFiles.length > 0 ? "border-b border-border" : ""} ${dragOverFolderKey === ".." ? "bg-primary/10" : ""}`}
+                  onDragOver={(e) => {
+                    if (!draggingFileKey) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    setDragOverFolderKey("..");
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverFolderKey === "..") {
+                      setDragOverFolderKey(null);
+                    }
+                  }}
+                  onDrop={async (e) => {
+                    if (!draggingFileKey) return;
+                    e.preventDefault();
+                    await handleMoveToFolder(getParentPath(currentPath));
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-4 text-left"
+                    onClick={() => navigateToPath(getParentPath(currentPath))}
+                  >
+                    <FolderOpen className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">...</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">Up one folder</p>
+                    </div>
+                  </button>
+                </div>
+              )}
+
+              {paginatedFiles.map((file, index) => (
                 <div
                   key={file.key}
-                  className={`group flex items-center gap-4 px-4 py-3 ${index !== files.length - 1 ? "border-b border-border" : ""} ${file.isFolder && dragOverFolderKey === file.key ? "bg-primary/10" : ""}`}
+                  className={`group flex items-center gap-4 px-4 py-3 ${index !== paginatedFiles.length - 1 ? "border-b border-border" : ""} ${file.isFolder && dragOverFolderKey === file.key ? "bg-primary/10" : ""}`}
                   onDragOver={(e) => {
                     if (!file.isFolder || !draggingFileKey) return;
                     e.preventDefault();
@@ -768,6 +984,34 @@ function AdminPage() {
                   </Button>
                 </div>
               ))}
+            </div>
+          )}
+
+          {filteredFiles.length > ITEMS_PER_PAGE && (
+            <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm text-muted-foreground">
+              <span>
+                Page {page} of {totalPages}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={page === 1}
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                >
+                  Previous
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={page === totalPages}
+                  onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                >
+                  Next
+                </Button>
+              </div>
             </div>
           )}
         </section>
