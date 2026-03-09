@@ -60,6 +60,39 @@ import {
 } from "@/lib/admin-page"
 import type { FolderOption, StorageObject } from "@/lib/storage"
 
+function uploadToSignedUrl(
+  uploadUrl: string,
+  file: File,
+  onProgress?: (progress: number) => void
+) {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open("PUT", uploadUrl)
+    xhr.setRequestHeader("content-type", file.type || "application/octet-stream")
+
+    xhr.upload.addEventListener("progress", (event) => {
+      if (!event.lengthComputable) return
+      onProgress?.(event.loaded / event.total)
+    })
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress?.(1)
+        resolve()
+        return
+      }
+
+      reject(new Error("Failed to upload file to storage"))
+    })
+
+    xhr.addEventListener("error", () => {
+      reject(new Error("Failed to upload file to storage"))
+    })
+
+    xhr.send(file)
+  })
+}
+
 function AdminPageContent() {
   const ITEMS_PER_PAGE = 20
   const router = useRouter()
@@ -338,7 +371,8 @@ function AdminPageContent() {
     file: File,
     destinationPath: string,
     conflictAction?: UploadConflictAction,
-    key?: string
+    key?: string,
+    onProgress?: (progress: number) => void
   ) {
     const response = await fetch("/api/admin/upload/url", {
       method: "POST",
@@ -365,17 +399,7 @@ function AdminPageContent() {
         throw new Error("Upload URL generation failed")
       }
 
-      const uploadResponse = await fetch(directUpload.uploadUrl, {
-        method: "PUT",
-        headers: {
-          "content-type": file.type || "application/octet-stream",
-        },
-        body: file,
-      })
-
-      if (!uploadResponse.ok) {
-        throw new Error("Failed to upload file to storage")
-      }
+      await uploadToSignedUrl(directUpload.uploadUrl, file, onProgress)
 
       await fetchJson<{ key: string }>("/api/admin/upload/complete", {
         method: "POST",
@@ -437,7 +461,17 @@ function AdminPageContent() {
       const uploadedFiles: UploadedFileResult[] = []
 
       for (const [index, file] of filesToUpload.entries()) {
-        let uploadResult = await requestUpload(file, destinationPath)
+        let uploadResult = await requestUpload(
+          file,
+          destinationPath,
+          undefined,
+          undefined,
+          (progress) => {
+            setUploadProgress(
+              Math.round(((index + progress) / filesToUpload.length) * 100)
+            )
+          }
+        )
 
         if (!uploadResult.ok) {
           setUploading(false)
@@ -454,7 +488,17 @@ function AdminPageContent() {
           }
 
           setUploading(true)
-          uploadResult = await requestUpload(file, destinationPath, action)
+          uploadResult = await requestUpload(
+            file,
+            destinationPath,
+            action,
+            undefined,
+            (progress) => {
+              setUploadProgress(
+                Math.round(((index + progress) / filesToUpload.length) * 100)
+              )
+            }
+          )
 
           if (!uploadResult.ok) {
             throw new Error(uploadResult.conflict.error)
@@ -507,7 +551,12 @@ function AdminPageContent() {
           item.file,
           destinationPath,
           undefined,
-          baseKey
+          baseKey,
+          (progress) => {
+            setUploadProgress(
+              Math.round(((index + progress) / itemsToUpload.length) * 100)
+            )
+          }
         )
 
         if (!uploadResult.ok) {
@@ -529,7 +578,12 @@ function AdminPageContent() {
             item.file,
             destinationPath,
             action,
-            baseKey
+            baseKey,
+            (progress) => {
+              setUploadProgress(
+                Math.round(((index + progress) / itemsToUpload.length) * 100)
+              )
+            }
           )
 
           if (!uploadResult.ok) {
