@@ -105,6 +105,7 @@ function AdminPageContent() {
   const [useLocalTime, setUseLocalTime] = useState(false)
 
   const [folders, setFolders] = useState<FolderOption[]>([])
+  const [foldersLoaded, setFoldersLoaded] = useState(false)
   const [requiresPasswordChange, setRequiresPasswordChange] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [dragActive, setDragActive] = useState(false)
@@ -332,9 +333,14 @@ function AdminPageContent() {
     applyAdminData(nextData)
   }
 
-  async function loadFolders() {
+  async function loadFolders(force = false) {
+    if (foldersLoaded && !force) {
+      return folders
+    }
+
     const nextFolders = await fetchJson<FolderOption[]>("/api/admin/folders")
     setFolders(nextFolders)
+    setFoldersLoaded(true)
     return nextFolders
   }
 
@@ -605,7 +611,7 @@ function AdminPageContent() {
       }
 
       await refresh()
-      await loadFolders()
+      await loadFolders(true)
       goeyToast.success("Upload completed.", {
         description:
           itemsToUpload.length === 1
@@ -979,7 +985,7 @@ function AdminPageContent() {
         }),
       })
       await refresh()
-      await loadFolders()
+      await loadFolders(true)
       goeyToast.success("Folder renamed.", {
         description: `"${renameFolderTarget.name}" successfully renamed to "${renameFolderName.trim()}".`,
       })
