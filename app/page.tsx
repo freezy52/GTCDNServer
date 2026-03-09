@@ -5,6 +5,7 @@ import { motion } from "framer-motion"
 import { ArrowRight, FolderLock, Globe, Shield } from "lucide-react"
 
 import Navbar from "@/components/layout/navbar"
+import { authClient } from "@/lib/auth-client"
 import { buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -30,6 +31,10 @@ const features = [
 ]
 
 export default function Page() {
+  const { data: session } = authClient.useSession()
+  const ctaHref = session ? "/admin" : "/login"
+  const ctaLabel = session ? "Manage Files!" : "Get Started!"
+
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <Navbar />
@@ -63,8 +68,8 @@ export default function Page() {
             Just deploy, point your server, and keep your cache private.
           </p>
           <div className="flex gap-3 pt-1">
-            <Link href="/admin" className={cn(buttonVariants({ size: "lg" }))}>
-              Manage Files
+            <Link href={ctaHref} className={cn(buttonVariants({ size: "lg" }))}>
+              {ctaLabel}
               <ArrowRight className="size-4" />
             </Link>
           </div>

@@ -10,6 +10,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3"
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { like } from "drizzle-orm"
 
 import { db, schema } from "@/lib/db"
@@ -288,6 +289,27 @@ export async function uploadFile(
   )
   await upsertFolders(getFolderChain(key))
   return key
+}
+
+export async function createPresignedUpload(
+  key: string,
+  contentType: string
+): Promise<string> {
+  const { bucket, client } = await getStorageClient()
+
+  return getSignedUrl(
+    client,
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ContentType: contentType,
+    }),
+    { expiresIn: 60 * 10 }
+  )
+}
+
+export async function finalizeUploadedFile(key: string): Promise<void> {
+  await upsertFolders(getFolderChain(key))
 }
 
 export async function createFolder(key: string): Promise<void> {

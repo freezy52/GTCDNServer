@@ -44,6 +44,7 @@ import {
   type AdminPageData,
   type UploadConflictAction,
   type UploadConflictResponse,
+  type UploadDirectResponse,
   type UploadedFileResult,
   fetchJson,
   formatBytes,
@@ -339,33 +340,52 @@ function AdminPageContent() {
     conflictAction?: UploadConflictAction,
     key?: string
   ) {
-    const body = new FormData()
-    body.append("file", file)
-    body.append("path", destinationPath)
-
-    if (conflictAction) {
-      body.append("conflictAction", conflictAction)
-    }
-
-    if (key) {
-      body.append("key", key)
-    }
-
-    const response = await fetch("/api/admin/upload", {
+    const response = await fetch("/api/admin/upload/url", {
       method: "POST",
-      body,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        path: destinationPath,
+        key,
+        fileName: file.name,
+        contentType: file.type || "application/octet-stream",
+        conflictAction,
+      }),
       cache: "no-store",
     })
 
     const payload = (await response.json().catch(() => null)) as
-      | { error?: string; key?: string }
+      | { error?: string; key?: string; uploadUrl?: string }
       | UploadConflictResponse
       | null
 
     if (response.ok) {
+      const directUpload = payload as UploadDirectResponse | null
+
+      if (!directUpload?.uploadUrl || !directUpload.key) {
+        throw new Error("Upload URL generation failed")
+      }
+
+      const uploadResponse = await fetch(directUpload.uploadUrl, {
+        method: "PUT",
+        headers: {
+          "content-type": file.type || "application/octet-stream",
+        },
+        body: file,
+      })
+
+      if (!uploadResponse.ok) {
+        throw new Error("Failed to upload file to storage")
+      }
+
+      await fetchJson<{ key: string }>("/api/admin/upload/complete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key: directUpload.key }),
+      })
+
       return {
         ok: true as const,
-        key: payload && "key" in payload ? payload.key ?? "" : "",
+        key: directUpload.key,
       }
     }
 

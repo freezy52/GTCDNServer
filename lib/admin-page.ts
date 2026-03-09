@@ -17,6 +17,11 @@ export type UploadConflictResponse = {
   suggestedKey: string
 }
 
+export type UploadDirectResponse = {
+  key: string
+  uploadUrl: string
+}
+
 export type UploadedFileResult = {
   originalName: string
   uploadedName: string
