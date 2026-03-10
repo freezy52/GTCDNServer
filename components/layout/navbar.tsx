@@ -101,6 +101,15 @@ export default function Navbar({ adminProfile }: NavbarProps) {
             >
               File Manager
             </Link>
+            <Link
+              href="/tools"
+              className={cn(
+                buttonVariants({ variant: "ghost", size: "sm" }),
+                "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Tools
+            </Link>
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
@@ -250,6 +259,16 @@ export default function Navbar({ adminProfile }: NavbarProps) {
                   )}
                 >
                   File Manager
+                </Link>
+                <Link
+                  href="/tools"
+                  onClick={() => setIsOpen(false)}
+                  className={cn(
+                    buttonVariants({ variant: "ghost" }),
+                    "w-full justify-start text-sm"
+                  )}
+                >
+                  Tools
                 </Link>
               </nav>
 

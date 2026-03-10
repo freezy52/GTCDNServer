@@ -133,6 +133,31 @@
 }
 
 @layer utilities {
+  .tools-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--color-primary) 45%, transparent)
+      color-mix(in oklch, var(--color-muted) 50%, transparent);
+  }
+
+  .tools-scroll::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .tools-scroll::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 999px;
+  }
+
+  .tools-scroll::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--color-primary) 40%, transparent);
+    border-radius: 999px;
+  }
+
+  .tools-scroll::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--color-primary) 65%, transparent);
+  }
+
   .upload-queue-scroll {
     scrollbar-width: thin;
     scrollbar-color: color-mix(in oklch, var(--color-primary) 55%, transparent)
