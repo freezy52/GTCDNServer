@@ -51,13 +51,16 @@ import {
   buildPublicFileUrl,
   formatFolderLabel,
   formatUploadedDate,
+  getDecodedJsonFileName,
   getFileNameFromKey,
   getBreadcrumbs,
   getParentPath,
   getUploadSuccessDescription,
+  isDatFileName,
   mergeUploadQueue,
   normalizePath,
 } from "@/lib/admin-page"
+import { decodeItemsDat } from "@/lib/items-dat-helper"
 import type { FolderOption, StorageObject } from "@/lib/storage"
 
 function uploadToSignedUrl(
@@ -695,7 +698,7 @@ function AdminPageContent() {
       const merged = [...current]
 
       for (const file of nextFiles) {
-        const relativePath = 3
+        const relativePath =
           file.webkitRelativePath?.replace(/\\/g, "/") || file.name
         const exists = merged.some(
           (item) =>
@@ -806,6 +809,67 @@ function AdminPageContent() {
             : "Failed to download file.",
       })
     }
+  }
+
+  async function handleDecodeFile(file: StorageObject) {
+    if (!isDatFileName(file.name)) {
+      goeyToast.error("Decode unavailable.", {
+        description: "Only .dat files can be decoded.",
+      })
+      return
+    }
+
+    const url = buildPublicFileUrl(file.key)
+
+    if (!url) {
+      goeyToast.error("Decode unavailable.", {
+        description: "Set NEXT_PUBLIC_R2_PUBLIC_URL to enable direct file access.",
+      })
+      return
+    }
+
+    const decodePromise = (async () => {
+      const response = await fetch(url, { cache: "no-store" })
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch file")
+      }
+
+      const buffer = new Uint8Array(await response.arrayBuffer())
+      const decoded = decodeItemsDat(buffer)
+      const json = JSON.stringify(decoded, null, 2)
+      const objectUrl = URL.createObjectURL(
+        new Blob([json], { type: "application/json" })
+      )
+      const anchor = document.createElement("a")
+      anchor.href = objectUrl
+      anchor.download = getDecodedJsonFileName(file.name)
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(objectUrl)
+      return {
+        fileName: file.name,
+        decodedName: getDecodedJsonFileName(file.name),
+        itemCount: decoded.item_count,
+      }
+    })()
+
+    setFileActionsKey(null)
+
+    void goeyToast.promise(decodePromise, {
+      loading: `Decoding "${file.name}"`,
+      success: "Decode completed.",
+      error: "Decode failed.",
+      description: {
+        success: (result) =>
+          `"${result.fileName}" decoded successfully as "${result.decodedName}" with ${result.itemCount.toLocaleString()} items.`,
+        error: (decodeError) =>
+          decodeError instanceof Error
+            ? decodeError.message
+            : "This file is not a valid supported items.dat file.",
+      },
+    })
   }
 
   function openRenameModal(file: StorageObject) {
@@ -1662,6 +1726,16 @@ function AdminPageContent() {
                                 <Download className="mr-2 size-3.5" />
                                 Download file
                               </button>
+                              {isDatFileName(file.name) ? (
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-popover-foreground transition-colors hover:bg-muted"
+                                  onClick={() => handleDecodeFile(file)}
+                                >
+                                  <FileText className="mr-2 size-3.5" />
+                                  Decode
+                                </button>
+                              ) : null}
                               <button
                                 type="button"
                                 className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-popover-foreground transition-colors hover:bg-muted"

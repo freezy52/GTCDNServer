@@ -134,6 +134,14 @@ export function getFileNameFromKey(key: string) {
   return key.split("/").pop() || key
 }
 
+export function isDatFileName(name: string) {
+  return /\.dat$/i.test(name)
+}
+
+export function getDecodedJsonFileName(name: string) {
+  return name.replace(/\.dat$/i, "") + ".json"
+}
+
 export function buildPublicFileUrl(key: string) {
   const baseUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_URL?.trim()
 
