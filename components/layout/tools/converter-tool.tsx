@@ -128,7 +128,7 @@ export function ConverterTool() {
               buf = encodeItemsDat(data)
               const hash = protonHash(buf)
               const nextDownload = {
-                data: buf.buffer.slice(0),
+                data: Uint8Array.from(buf),
                 fileName: "items.dat",
               } satisfies DownloadPayload
               saveBlob(nextDownload.data, nextDownload.fileName)
@@ -141,7 +141,7 @@ export function ConverterTool() {
               buf = encodeItemsDatFromTxt(text)
               const hash = protonHash(buf)
               const nextDownload = {
-                data: buf.buffer.slice(0),
+                data: Uint8Array.from(buf),
                 fileName: "items.dat",
               } satisfies DownloadPayload
               saveBlob(nextDownload.data, nextDownload.fileName)
