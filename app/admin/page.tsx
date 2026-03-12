@@ -26,7 +26,6 @@ import Navbar from "@/components/layout/navbar"
 import RenameFileModal from "@/components/layout/rename-file-modal"
 import RenameFolderModal from "@/components/layout/rename-folder-modal"
 import UploadConflictModal from "@/components/layout/upload-conflict-modal"
-import UploadFolderModal from "@/components/layout/upload-folder-modal"
 import UploadModal from "@/components/layout/upload-modal"
 import { Button } from "@/components/ui/button"
 import CustomSelect from "@/components/ui/custom-select"
@@ -58,7 +57,6 @@ import {
   getParentPath,
   getUploadSuccessDescription,
   isDatFileName,
-  mergeUploadQueue,
   normalizePath,
 } from "@/lib/admin-page"
 import { decodeItemsDat } from "@/lib/items-dat-helper"
@@ -134,13 +132,8 @@ function AdminPageContent() {
   const [folderName, setFolderName] = useState("")
   const [folderError, setFolderError] = useState<string | null>(null)
   const [uploadModalOpen, setUploadModalOpen] = useState(false)
-  const [uploadFolderModalOpen, setUploadFolderModalOpen] = useState(false)
   const [uploadDestination, setUploadDestination] = useState("")
-  const [uploadFolderDestination, setUploadFolderDestination] = useState("")
-  const [uploadQueue, setUploadQueue] = useState<File[]>([])
-  const [uploadFolderQueue, setUploadFolderQueue] = useState<
-    Array<{ file: File; relativePath: string }>
-  >([])
+  const [uploadQueue, setUploadQueue] = useState<Array<{ file: File; relativePath: string }>>([])
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadConflict, setUploadConflict] = useState<{
     file: File
@@ -182,7 +175,7 @@ function AdminPageContent() {
 
     input.setAttribute("webkitdirectory", "")
     input.setAttribute("directory", "")
-  }, [uploadFolderModalOpen])
+  }, [uploadModalOpen])
 
   function applyAdminData(nextData: AdminPageData) {
     adminDataCacheRef.current.set(nextData.currentPath, nextData)
@@ -661,32 +654,38 @@ function AdminPageContent() {
 
   async function openUploadFolderModal() {
     setError(null)
-    setUploadFolderQueue([])
+    setUploadQueue([])
     setUploadProgress(0)
     setUploadConflict(null)
-    setUploadFolderDestination(currentPath)
+    setUploadDestination(currentPath)
     await loadFolders()
-    setUploadFolderModalOpen(true)
+    setUploadModalOpen(true)
   }
 
   function handleUploadQueueChange(event: React.ChangeEvent<HTMLInputElement>) {
     const nextFiles = Array.from(event.target.files ?? [])
     if (nextFiles.length === 0) return
 
-    setUploadQueue((current) => mergeUploadQueue(current, nextFiles))
+    setUploadQueue((current) => {
+      const merged = [...current]
+      for (const file of nextFiles) {
+        const relativePath = file.name
+        const exists = merged.some(
+          (item) =>
+            item.relativePath === relativePath &&
+            item.file.size === file.size &&
+            item.file.lastModified === file.lastModified
+        )
+        if (!exists) merged.push({ file, relativePath })
+      }
+      return merged
+    })
     event.target.value = ""
   }
 
-  function removeUploadQueueItem(fileToRemove: File) {
+  function removeUploadQueueItem(relativePath: string) {
     setUploadQueue((current) =>
-      current.filter(
-        (file) =>
-          !(
-            file.name === fileToRemove.name &&
-            file.size === fileToRemove.size &&
-            file.lastModified === fileToRemove.lastModified
-          )
-      )
+      current.filter((item) => item.relativePath !== relativePath)
     )
   }
 
@@ -696,7 +695,7 @@ function AdminPageContent() {
     const nextFiles = Array.from(event.target.files ?? [])
     if (nextFiles.length === 0) return
 
-    setUploadFolderQueue((current) => {
+    setUploadQueue((current) => {
       const merged = [...current]
 
       for (const file of nextFiles) {
@@ -720,7 +719,7 @@ function AdminPageContent() {
   }
 
   function removeUploadFolderQueueItem(relativePath: string) {
-    setUploadFolderQueue((current) =>
+    setUploadQueue((current) =>
       current.filter((item) => item.relativePath !== relativePath)
     )
   }
@@ -896,21 +895,10 @@ function AdminPageContent() {
 
   async function handleUploadSubmit(event: React.FormEvent) {
     event.preventDefault()
-    const ok = await uploadFilesToPath(uploadQueue, uploadDestination)
+    const ok = await uploadFolderItemsToPath(uploadQueue, uploadDestination)
     if (!ok) return
     setUploadQueue([])
     setUploadModalOpen(false)
-  }
-
-  async function handleUploadFolderSubmit(event: React.FormEvent) {
-    event.preventDefault()
-    const ok = await uploadFolderItemsToPath(
-      uploadFolderQueue,
-      uploadFolderDestination
-    )
-    if (!ok) return
-    setUploadFolderQueue([])
-    setUploadFolderModalOpen(false)
   }
 
   async function openMoveModal(fileKey: string) {
@@ -1166,32 +1154,11 @@ function AdminPageContent() {
         uploadQueue={uploadQueue}
         uploadProgress={uploadProgress}
         fileInputRef={fileInputRef}
-        onFileChange={handleUploadQueueChange}
-        onRemoveFile={removeUploadQueueItem}
-        onSubmit={handleUploadSubmit}
-        formatFolderLabel={formatFolderLabel}
-        formatBytes={formatBytes}
-      />
-
-      <UploadFolderModal
-        open={uploadFolderModalOpen}
-        onOpenChange={(open) => {
-          setUploadFolderModalOpen(open)
-
-          if (!open) {
-            resolveUploadConflict("cancel")
-          }
-        }}
-        folders={folders}
-        uploadDestination={uploadFolderDestination}
-        onUploadDestinationChange={setUploadFolderDestination}
-        uploading={uploading}
-        uploadQueue={uploadFolderQueue}
-        uploadProgress={uploadProgress}
         folderInputRef={folderInputRef}
+        onFileChange={handleUploadQueueChange}
         onFolderChange={handleUploadFolderQueueChange}
-        onRemoveItem={removeUploadFolderQueueItem}
-        onSubmit={handleUploadFolderSubmit}
+        onRemoveItem={removeUploadQueueItem}
+        onSubmit={handleUploadSubmit}
         formatFolderLabel={formatFolderLabel}
         formatBytes={formatBytes}
       />
@@ -1476,15 +1443,6 @@ function AdminPageContent() {
             >
               <Upload className="size-3.5" />
               {uploading ? "Uploading..." : "Upload"}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={showLoadingShell}
-              onClick={openUploadFolderModal}
-            >
-              <FolderOpen className="size-3.5" />
-              Upload Folder
             </Button>
           </div>
         </div>
