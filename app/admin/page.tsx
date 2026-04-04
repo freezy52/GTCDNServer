@@ -659,7 +659,17 @@ function AdminPageContent() {
     setUploadProgress(0)
     setUploadConflict(null)
     setUploadDestination(currentPath)
-    await loadFolders()
+    try {
+      await loadFolders()
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to load folders"
+      setError(message)
+      goeyToast.error("Upload unavailable.", {
+        description: message,
+      })
+      return
+    }
     setUploadModalOpen(true)
   }
 
@@ -669,7 +679,17 @@ function AdminPageContent() {
     setUploadProgress(0)
     setUploadConflict(null)
     setUploadDestination(currentPath)
-    await loadFolders()
+    try {
+      await loadFolders()
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to load folders"
+      setError(message)
+      goeyToast.error("Folder upload unavailable.", {
+        description: message,
+      })
+      return
+    }
     setUploadModalOpen(true)
   }
 
@@ -916,7 +936,17 @@ function AdminPageContent() {
     setMoveError(null)
     setMoveFileKey(fileKey)
     setMoveDestination(currentPath)
-    await loadFolders()
+    try {
+      await loadFolders()
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to load folders"
+      setMoveError(message)
+      goeyToast.error("Move unavailable.", {
+        description: message,
+      })
+      return
+    }
     setMoveModalOpen(true)
   }
 
