@@ -56,6 +56,7 @@ import {
   getBreadcrumbs,
   getParentPath,
   getUploadSuccessDescription,
+  ApiError,
   isDatFileName,
   normalizePath,
 } from "@/lib/admin-page"
@@ -199,8 +200,18 @@ function AdminPageContent() {
           `/api/admin/status?path=${encodeURIComponent(currentPath)}`
         )
         applyAdminData(nextData)
-      } catch {
-        router.replace("/login")
+        setError(null)
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          router.replace("/login")
+          return
+        }
+
+        setError(
+          error instanceof Error
+            ? error.message
+            : "Failed to load admin dashboard."
+        )
       } finally {
         setLoadingPage(false)
       }

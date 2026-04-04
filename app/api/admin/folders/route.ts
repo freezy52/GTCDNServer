@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-import { jsonError } from "@/lib/http"
+import { getErrorStatus, jsonError } from "@/lib/http"
 import { requireRequestSession } from "@/lib/session"
 import { createFolder, listFolders, renameFolder } from "@/lib/storage-server"
 
@@ -9,7 +9,7 @@ export async function GET(request: Request) {
     await requireRequestSession(request)
     return NextResponse.json(await listFolders())
   } catch (error) {
-    return jsonError(error, 401)
+    return jsonError(error, getErrorStatus(error))
   }
 }
 

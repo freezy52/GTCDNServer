@@ -27,6 +27,16 @@ export type UploadedFileResult = {
   uploadedName: string
 }
 
+export class ApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = "ApiError"
+    this.status = status
+  }
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B"
   const k = 1024
@@ -106,7 +116,7 @@ export async function fetchJson<T>(
     const errorBody = (await response.json().catch(() => null)) as {
       error?: string
     } | null
-    throw new Error(errorBody?.error || "Request failed")
+    throw new ApiError(errorBody?.error || "Request failed", response.status)
   }
 
   return response.json() as Promise<T>

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-import { jsonError } from "@/lib/http"
+import { getErrorStatus, jsonError } from "@/lib/http"
 import { requireRequestSession } from "@/lib/session"
 import { deleteFile, listFiles } from "@/lib/storage-server"
 
@@ -11,7 +11,7 @@ export async function GET(request: Request) {
     const path = searchParams.get("path") ?? ""
     return NextResponse.json(await listFiles(path))
   } catch (error) {
-    return jsonError(error, 401)
+    return jsonError(error, getErrorStatus(error))
   }
 }
 
