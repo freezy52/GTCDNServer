@@ -92,6 +92,12 @@ function fieldLabel(key: string) {
   return key.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
+function hashTextValue(value: string) {
+  const normalized = value.trim()
+  if (!normalized) return 0
+  return protonHash(new TextEncoder().encode(normalized))
+}
+
 const ItemEditorForm = memo(function ItemEditorForm({
   item,
   viewMode,
@@ -103,13 +109,25 @@ const ItemEditorForm = memo(function ItemEditorForm({
 }) {
   const handleChange = (key: keyof ItemEntry, value: string) => {
     const current = item[key]
+    const nextItem = { ...item }
 
     if (typeof current === "number") {
-      onChange({ ...item, [key]: Number(value) })
+      ;(nextItem as Record<keyof ItemEntry, unknown>)[key] = Number(value)
+      onChange(nextItem)
       return
     }
 
-    onChange({ ...item, [key]: value })
+    ;(nextItem as Record<keyof ItemEntry, unknown>)[key] = value
+
+    if (key === "texture") {
+      nextItem.texture_hash = hashTextValue(value)
+    }
+
+    if (key === "extra_file") {
+      nextItem.extra_file_hash = hashTextValue(value)
+    }
+
+    onChange(nextItem)
   }
 
   return (
@@ -144,14 +162,24 @@ const ItemEditorForm = memo(function ItemEditorForm({
                     <input
                       type="text"
                       readOnly={readOnly}
-                      defaultValue={displayValue}
-                      onBlur={(event) => {
+                      value={displayValue}
+                      onChange={(event) => {
                         if (!readOnly) handleChange(field, event.target.value)
                       }}
                       className={`h-8 rounded-md border border-border/60 bg-muted/30 px-3 font-mono text-xs text-foreground outline-none transition-colors focus:border-primary focus:bg-card focus:ring-1 focus:ring-primary/30 ${
                         readOnly ? "cursor-default opacity-50" : ""
                       }`}
                     />
+                    {field === "texture" ? (
+                      <p className="text-[11px] text-muted-foreground">
+                        Texture Hash otomatik hesaplanir.
+                      </p>
+                    ) : null}
+                    {field === "extra_file" ? (
+                      <p className="text-[11px] text-muted-foreground">
+                        Extra File Hash otomatik hesaplanir.
+                      </p>
+                    ) : null}
                   </div>
                 )
               })}
