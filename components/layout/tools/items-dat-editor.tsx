@@ -56,6 +56,7 @@ const BASIC_FIELDS = new Set<keyof ItemEntry>([
 
 type CreationPreset = "generic" | "block" | "seed" | "door" | "clothing"
 type ViewMode = "basic" | "advanced"
+type AssetField = "texture" | "extra_file"
 
 const FIELD_GROUPS: { label: string; fields: (keyof ItemEntry)[] }[] = [
   {
@@ -95,14 +96,29 @@ function fieldLabel(key: string) {
 const ItemEditorForm = memo(function ItemEditorForm({
   item,
   viewMode,
+  assetFolderOptions,
+  onAssetUpload,
   onChange,
 }: {
   item: ItemEntry
   viewMode: ViewMode
+  assetFolderOptions: string[]
+  onAssetUpload?: (
+    field: AssetField,
+    file: File,
+    targetFolder: string
+  ) => Promise<{ storedPath: string; hash: number }>
   onChange: (updated: ItemEntry) => void
 }) {
   const textureFileInputRef = useRef<HTMLInputElement>(null)
   const extraFileInputRef = useRef<HTMLInputElement>(null)
+  const [textureTargetFolder, setTextureTargetFolder] = useState(
+    assetFolderOptions[0] ?? "game"
+  )
+  const [extraTargetFolder, setExtraTargetFolder] = useState(
+    assetFolderOptions[0] ?? "game"
+  )
+  const [uploadingField, setUploadingField] = useState<AssetField | null>(null)
 
   const handleChange = (key: keyof ItemEntry, value: string) => {
     const current = item[key]
@@ -120,30 +136,50 @@ const ItemEditorForm = memo(function ItemEditorForm({
   }
 
   const handleHashFileSelect = useCallback(
-    (target: "texture" | "extra_file", file: File | null) => {
+    async (target: AssetField, file: File | null) => {
       if (!file) return
 
-      const reader = new FileReader()
-      reader.readAsArrayBuffer(file)
-      reader.onload = (event) => {
-        try {
-          const buffer = new Uint8Array(event.target?.result as ArrayBuffer)
-          const hash = protonHash(buffer)
+      const targetFolder =
+        target === "texture" ? textureTargetFolder : extraTargetFolder
 
+      setUploadingField(target)
+
+      try {
+        const buffer = new Uint8Array(await file.arrayBuffer())
+        const hash = protonHash(buffer)
+
+        if (onAssetUpload) {
+          const uploaded = await onAssetUpload(target, file, targetFolder)
           onChange({
             ...item,
-            [target]: file.name,
-            [target === "texture" ? "texture_hash" : "extra_file_hash"]: hash,
+            [target]: uploaded.storedPath,
+            [target === "texture" ? "texture_hash" : "extra_file_hash"]:
+              uploaded.hash,
           })
-        } catch {
-          onChange({
-            ...item,
-            [target]: file.name,
-          })
+          return
         }
+
+        onChange({
+          ...item,
+          [target]: file.name,
+          [target === "texture" ? "texture_hash" : "extra_file_hash"]: hash,
+        })
+      } catch {
+        onChange({
+          ...item,
+          [target]: file.name,
+        })
+      } finally {
+        setUploadingField(null)
       }
     },
-    [item, onChange]
+    [
+      extraTargetFolder,
+      item,
+      onAssetUpload,
+      onChange,
+      textureTargetFolder,
+    ]
   )
 
   return (
@@ -187,54 +223,96 @@ const ItemEditorForm = memo(function ItemEditorForm({
                       }`}
                     />
                     {field === "texture" ? (
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <input
                           ref={textureFileInputRef}
                           type="file"
                           className="hidden"
-                          onChange={(event) => {
-                            handleHashFileSelect(
+                          onChange={async (event) => {
+                            await handleHashFileSelect(
                               "texture",
                               event.target.files?.[0] ?? null
                             )
                             event.target.value = ""
                           }}
                         />
+                        {onAssetUpload ? (
+                          <select
+                            value={textureTargetFolder}
+                            onChange={(event) =>
+                              setTextureTargetFolder(event.target.value)
+                            }
+                            className="rounded-md border border-border/60 bg-background px-2 py-1 text-[11px] text-foreground outline-none"
+                          >
+                            {assetFolderOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => textureFileInputRef.current?.click()}
                           className="text-[11px] font-medium text-primary hover:underline"
                         >
-                          RTTEX sec ve dogru hash doldur
+                          {uploadingField === "texture"
+                            ? "Yukleniyor..."
+                            : onAssetUpload
+                              ? "Sec, yukle, hash doldur"
+                              : "RTTEX sec ve dogru hash doldur"}
                         </button>
                         <p className="text-[11px] text-muted-foreground">
-                          Dosya iceriginden hesaplanir.
+                          {onAssetUpload
+                            ? "Secilen klasore yuklenir ve dosya iceriginden hash hesaplanir."
+                            : "Dosya iceriginden hesaplanir."}
                         </p>
                       </div>
                     ) : null}
                     {field === "extra_file" ? (
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <input
                           ref={extraFileInputRef}
                           type="file"
                           className="hidden"
-                          onChange={(event) => {
-                            handleHashFileSelect(
+                          onChange={async (event) => {
+                            await handleHashFileSelect(
                               "extra_file",
                               event.target.files?.[0] ?? null
                             )
                             event.target.value = ""
                           }}
                         />
+                        {onAssetUpload ? (
+                          <select
+                            value={extraTargetFolder}
+                            onChange={(event) =>
+                              setExtraTargetFolder(event.target.value)
+                            }
+                            className="rounded-md border border-border/60 bg-background px-2 py-1 text-[11px] text-foreground outline-none"
+                          >
+                            {assetFolderOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => extraFileInputRef.current?.click()}
                           className="text-[11px] font-medium text-primary hover:underline"
                         >
-                          Dosya sec ve hash doldur
+                          {uploadingField === "extra_file"
+                            ? "Yukleniyor..."
+                            : onAssetUpload
+                              ? "Sec, yukle, hash doldur"
+                              : "Dosya sec ve hash doldur"}
                         </button>
                         <p className="text-[11px] text-muted-foreground">
-                          Dosya iceriginden hesaplanir.
+                          {onAssetUpload
+                            ? "Secilen klasore yuklenir ve dosya iceriginden hash hesaplanir."
+                            : "Dosya iceriginden hesaplanir."}
                         </p>
                       </div>
                     ) : null}
@@ -405,6 +483,8 @@ export function ItemsDatEditor({
   emptySublabel = "or click to browse - binary .dat file",
   emptyDescription,
   onSave,
+  assetFolderOptions = ["game", "interface", "audio", "images"],
+  onAssetUpload,
   className,
 }: {
   initialFile?: LoadedItemsDatFile | null
@@ -415,6 +495,12 @@ export function ItemsDatEditor({
   emptySublabel?: string
   emptyDescription?: ReactNode
   onSave?: (payload: SavePayload) => Promise<string | void> | string | void
+  assetFolderOptions?: string[]
+  onAssetUpload?: (
+    field: AssetField,
+    file: File,
+    targetFolder: string
+  ) => Promise<{ storedPath: string; hash: number }>
   className?: string
 }) {
   const [loadedFile, setLoadedFile] = useState<LoadedItemsDatFile | null>(initialFile)
@@ -757,6 +843,8 @@ export function ItemsDatEditor({
                 key={selectedItem.item_id}
                 item={selectedItem}
                 viewMode={viewMode}
+                assetFolderOptions={assetFolderOptions}
+                onAssetUpload={onAssetUpload}
                 onChange={handleItemChange}
               />
             </div>

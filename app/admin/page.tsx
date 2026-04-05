@@ -1008,6 +1008,47 @@ function AdminPageContent() {
     return `Saved to cache - hash: ${hash >>> 0}`
   }
 
+  async function handleUploadEditorAsset(
+    field: "texture" | "extra_file",
+    file: File,
+    targetFolder: string
+  ) {
+    const normalizedFolder = normalizePath(targetFolder)
+    const uploadTarget = await fetchJson<UploadDirectResponse>(
+      "/api/admin/upload/url",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          key: `${normalizedFolder ? `${normalizedFolder}/` : ""}${file.name}`,
+          contentType: file.type || "application/octet-stream",
+          conflictAction: "rename",
+        }),
+      }
+    )
+
+    await uploadToSignedUrl(uploadTarget.uploadUrl, file)
+    await fetchJson("/api/admin/upload/complete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key: uploadTarget.key }),
+    })
+    await loadFolders(true)
+    await refresh()
+
+    const uploadedBuffer = new Uint8Array(await file.arrayBuffer())
+    const uploadedHash = protonHash(uploadedBuffer)
+
+    goeyToast.success("Asset uploaded.", {
+      description: `"${file.name}" uploaded to "${normalizedFolder || "/"}" for ${field}.`,
+    })
+
+    return {
+      storedPath: uploadTarget.key,
+      hash: uploadedHash,
+    }
+  }
+
   function openRenameModal(file: StorageObject) {
     setRenameTarget(file)
     setRenameName(file.name)
@@ -1401,6 +1442,8 @@ function AdminPageContent() {
                   initialFile={itemsEditorFile}
                   allowFileLoad={false}
                   saveLabel="Save to cache"
+                  assetFolderOptions={["game", "interface", "audio", "images"]}
+                  onAssetUpload={handleUploadEditorAsset}
                   onSave={handleSaveItemsEditor}
                 />
               </div>
