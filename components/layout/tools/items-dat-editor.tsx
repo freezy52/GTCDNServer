@@ -27,6 +27,8 @@ type SavePayload = {
   editedCount: number
 }
 
+const ITEM_ROW_HEIGHT = 40
+
 const FIELD_GROUPS: { label: string; fields: (keyof ItemEntry)[] }[] = [
   {
     label: "Identity",
@@ -127,7 +129,7 @@ const ItemEditorForm = memo(function ItemEditorForm({
   )
 })
 
-function VirtualItemList({
+const VirtualItemList = memo(function VirtualItemList({
   items,
   selectedId,
   editedIds,
@@ -143,12 +145,17 @@ function VirtualItemList({
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 36,
-    overscan: 8,
+    estimateSize: () => ITEM_ROW_HEIGHT,
+    getItemKey: (index) => items[index]?.item_id ?? index,
+    overscan: 5,
   })
 
   return (
-    <div ref={scrollRef} className="tools-scroll flex-1 overflow-y-auto">
+    <div
+      ref={scrollRef}
+      className="tools-scroll h-full flex-1 overflow-y-auto overscroll-contain touch-pan-y"
+      style={{ contain: "strict", WebkitOverflowScrolling: "touch" }}
+    >
       {items.length === 0 ? (
         <p className="px-3 py-4 text-center text-xs text-muted-foreground">No results</p>
       ) : (
@@ -163,16 +170,16 @@ function VirtualItemList({
                 key={item.item_id}
                 type="button"
                 data-index={virtualItem.index}
-                ref={virtualizer.measureElement}
                 onClick={() => onSelect(item.item_id)}
                 style={{
                   position: "absolute",
                   top: 0,
                   left: 0,
                   width: "100%",
+                  height: ITEM_ROW_HEIGHT,
                   transform: `translateY(${virtualItem.start}px)`,
                 }}
-                className={`flex items-center gap-2 px-3 py-2 text-left transition-colors ${
+                className={`flex items-center gap-2 px-3 text-left transition-colors ${
                   isSelected
                     ? "bg-primary/10 text-primary"
                     : "text-foreground hover:bg-muted/60"
@@ -192,7 +199,7 @@ function VirtualItemList({
       )}
     </div>
   )
-}
+})
 
 export function ItemsDatEditor({
   initialFile = null,
@@ -282,14 +289,22 @@ export function ItemsDatEditor({
     )
   }, [loadedFile, search])
 
+  const itemLookup = useMemo(() => {
+    if (!loadedFile) return new Map<number, ItemEntry>()
+
+    return new Map(
+      loadedFile.data.items.map((item) => [item.item_id, item] as const)
+    )
+  }, [loadedFile])
+
   const selectedItem = useMemo(() => {
     if (!loadedFile || selectedId === null) return null
     return (
       edits[selectedId] ??
-      loadedFile.data.items.find((item) => item.item_id === selectedId) ??
+      itemLookup.get(selectedId) ??
       null
     )
-  }, [selectedId, edits, loadedFile])
+  }, [selectedId, edits, itemLookup, loadedFile])
 
   const editedIds = useMemo(() => new Set(Object.keys(edits).map(Number)), [edits])
 
@@ -416,7 +431,7 @@ export function ItemsDatEditor({
       </div>
 
       <div className="flex min-h-0 flex-1 gap-3 overflow-hidden">
-        <div className="flex min-h-0 w-48 shrink-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/20 sm:w-56">
+        <div className="flex h-full min-h-0 w-48 shrink-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/20 sm:w-56">
           <div className="relative shrink-0 border-b border-border/60 p-2">
             <Search className="absolute top-1/2 left-4 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -435,7 +450,7 @@ export function ItemsDatEditor({
           />
         </div>
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/60">
+        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/60">
           {selectedItem ? (
             <div className="tools-scroll flex-1 overflow-y-auto p-5">
               <ItemEditorForm
