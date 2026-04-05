@@ -10,7 +10,7 @@ type ServerStatusResponse = {
   port: number
   protocol: "udp"
   timeoutMs: number
-  status: "reachable" | "unreachable" | "error"
+  status: "reachable" | "unreachable" | "unknown" | "error"
   detail: string
   checkedAt: string
 }
@@ -109,8 +109,9 @@ function useServerStatus() {
     }
   }
 
-  const status = data?.status ?? (error ? "error" : "reachable")
+  const status = data?.status ?? (error ? "error" : "unknown")
   const isReachable = status === "reachable"
+  const isUnknown = status === "unknown"
   const StatusIcon =
     loading || refreshing
       ? LoaderCircle
@@ -125,6 +126,7 @@ function useServerStatus() {
     refreshing,
     status,
     isReachable,
+    isUnknown,
     StatusIcon,
     refresh,
   }
@@ -135,7 +137,7 @@ export function ServerStatusBadge({
 }: {
   className?: string
 }) {
-  const { loading, refreshing, isReachable, StatusIcon, refresh } =
+  const { loading, refreshing, isReachable, isUnknown, StatusIcon, refresh } =
     useServerStatus()
 
   return (
@@ -146,7 +148,9 @@ export function ServerStatusBadge({
         "hidden h-9 items-center gap-2 rounded-xl border px-3 text-xs font-medium transition-colors md:inline-flex",
         isReachable
           ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/15"
-          : "border-rose-500/25 bg-rose-500/10 text-rose-600 hover:bg-rose-500/15",
+          : isUnknown
+            ? "border-amber-500/25 bg-amber-500/10 text-amber-600 hover:bg-amber-500/15"
+            : "border-rose-500/25 bg-rose-500/10 text-rose-600 hover:bg-rose-500/15",
         className
       )}
       title="Refresh server status"
@@ -156,13 +160,30 @@ export function ServerStatusBadge({
         className={cn("size-3.5", (loading || refreshing) && "animate-spin")}
         strokeWidth={1.9}
       />
-      <span>{loading ? "Checking..." : isReachable ? "Server Open" : "Server Down"}</span>
+      <span>
+        {loading
+          ? "Checking..."
+          : isReachable
+            ? "Server Open"
+            : isUnknown
+              ? "No Reply"
+              : "Server Down"}
+      </span>
     </button>
   )
 }
 
 export function ServerStatusCard({ compact = false }: { compact?: boolean }) {
-  const { data, error, loading, refreshing, isReachable, StatusIcon, refresh } =
+  const {
+    data,
+    error,
+    loading,
+    refreshing,
+    isReachable,
+    isUnknown,
+    StatusIcon,
+    refresh,
+  } =
     useServerStatus()
 
   return (
@@ -174,7 +195,9 @@ export function ServerStatusCard({ compact = false }: { compact?: boolean }) {
           className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl ${
             isReachable
               ? "bg-emerald-500/12 text-emerald-600"
-              : "bg-rose-500/12 text-rose-600"
+              : isUnknown
+                ? "bg-amber-500/12 text-amber-600"
+                : "bg-rose-500/12 text-rose-600"
           }`}
         >
           <StatusIcon
@@ -193,7 +216,9 @@ export function ServerStatusCard({ compact = false }: { compact?: boolean }) {
                   ? "Kontrol ediliyor..."
                   : isReachable
                     ? "Server acik gorunuyor"
-                    : "Server kapali ya da ulasilamiyor"}
+                    : isUnknown
+                      ? "UDP cevap vermedi"
+                      : "Server kapali ya da ulasilamiyor"}
               </p>
             </div>
             <button
@@ -228,8 +253,8 @@ export function ServerStatusCard({ compact = false }: { compact?: boolean }) {
                 : "Son kontrol henuz yapilmadi."}
             </p>
             <p className="text-[11px]">
-              UDP tarafinda bu kontrol, porttan aninda red gelmiyorsa server'i
-              erisilebilir kabul eder.
+              Sadece gercek UDP cevabi gelirse acik sayilir. Timeout durumunda
+              no reply gosterilir.
             </p>
           </div>
         </div>

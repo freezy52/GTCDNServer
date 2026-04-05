@@ -10,6 +10,7 @@ const PAYLOAD = Buffer.from("gtcdn-status")
 type ProbeResult =
   | { status: "reachable"; detail: string; checkedAt: string }
   | { status: "unreachable"; detail: string; checkedAt: string }
+  | { status: "unknown"; detail: string; checkedAt: string }
   | { status: "error"; detail: string; checkedAt: string }
 
 export const runtime = "nodejs"
@@ -44,6 +45,14 @@ function probeUdpPort() {
       })
     })
 
+    socket.once("message", () => {
+      finish({
+        status: "reachable",
+        detail: "UDP response received from the target server.",
+        checkedAt,
+      })
+    })
+
     try {
       socket.connect(PORT, HOST, () => {
         socket.send(PAYLOAD, (sendError) => {
@@ -58,8 +67,8 @@ function probeUdpPort() {
 
           setTimeout(() => {
             finish({
-              status: "reachable",
-              detail: "No immediate UDP rejection was received.",
+              status: "unknown",
+              detail: "No UDP response was received before timeout.",
               checkedAt,
             })
           }, TIMEOUT_MS)
