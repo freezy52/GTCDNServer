@@ -1014,13 +1014,16 @@ function AdminPageContent() {
     targetFolder: string
   ) {
     const normalizedFolder = normalizePath(targetFolder)
+    const cacheFolder = normalizePath(
+      normalizedFolder ? `cache/${normalizedFolder}` : "cache"
+    )
     const uploadTarget = await fetchJson<UploadDirectResponse>(
       "/api/admin/upload/url",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          key: `${normalizedFolder ? `${normalizedFolder}/` : ""}${file.name}`,
+          key: `${cacheFolder ? `${cacheFolder}/` : ""}${file.name}`,
           contentType: file.type || "application/octet-stream",
           conflictAction: "rename",
         }),
@@ -1040,11 +1043,11 @@ function AdminPageContent() {
     const uploadedHash = protonHash(uploadedBuffer)
 
     goeyToast.success("Asset uploaded.", {
-      description: `"${file.name}" uploaded to "${normalizedFolder || "/"}" for ${field}.`,
+      description: `"${file.name}" uploaded to "${cacheFolder || "cache"}" for ${field}.`,
     })
 
     return {
-      storedPath: uploadTarget.key,
+      storedPath: uploadTarget.key.replace(/^cache\/+/, ""),
       hash: uploadedHash,
     }
   }
