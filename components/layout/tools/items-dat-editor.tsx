@@ -216,7 +216,6 @@ export function ItemsDatEditor({
   className?: string
 }) {
   const [loadedFile, setLoadedFile] = useState<LoadedItemsDatFile | null>(initialFile)
-  const [itemIndex, setItemIndex] = useState<Map<number, ItemEntry>>(new Map())
   const [searchRaw, setSearchRaw] = useState("")
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [status, setStatus] = useState<Status>({ type: "idle" })
@@ -233,28 +232,15 @@ export function ItemsDatEditor({
     setEdits({})
 
     if (!initialFile) {
-      setItemIndex(new Map())
       setSelectedId(null)
       return
     }
 
-    const nextIndex = new Map<number, ItemEntry>()
-    for (const item of initialFile.data.items) {
-      nextIndex.set(item.item_id, item)
-    }
-
-    setItemIndex(nextIndex)
     setSelectedId(initialFile.data.items[0]?.item_id ?? null)
   }, [initialFile])
 
   const applyLoadedFile = useCallback((nextFile: LoadedItemsDatFile, successMessage?: string) => {
-    const nextIndex = new Map<number, ItemEntry>()
-    for (const item of nextFile.data.items) {
-      nextIndex.set(item.item_id, item)
-    }
-
     setLoadedFile(nextFile)
-    setItemIndex(nextIndex)
     setEdits({})
     setSearchRaw("")
     setSelectedId(nextFile.data.items[0]?.item_id ?? null)
@@ -297,9 +283,13 @@ export function ItemsDatEditor({
   }, [loadedFile, search])
 
   const selectedItem = useMemo(() => {
-    if (selectedId === null) return null
-    return edits[selectedId] ?? itemIndex.get(selectedId) ?? null
-  }, [selectedId, edits, itemIndex])
+    if (!loadedFile || selectedId === null) return null
+    return (
+      edits[selectedId] ??
+      loadedFile.data.items.find((item) => item.item_id === selectedId) ??
+      null
+    )
+  }, [selectedId, edits, loadedFile])
 
   const editedIds = useMemo(() => new Set(Object.keys(edits).map(Number)), [edits])
 
@@ -309,7 +299,6 @@ export function ItemsDatEditor({
 
   const handleReset = useCallback(() => {
     setLoadedFile(null)
-    setItemIndex(new Map())
     setSearchRaw("")
     setSelectedId(null)
     setStatus({ type: "idle" })
@@ -385,7 +374,7 @@ export function ItemsDatEditor({
   }
 
   return (
-    <div className={cn("flex min-h-0 flex-1 flex-col gap-4", className)}>
+    <div className={cn("flex min-h-0 flex-1 flex-col gap-4 overflow-hidden", className)}>
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <AnimatePresence>
@@ -426,8 +415,8 @@ export function ItemsDatEditor({
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 gap-3">
-        <div className="flex w-48 shrink-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/20 sm:w-56">
+      <div className="flex min-h-0 flex-1 gap-3 overflow-hidden">
+        <div className="flex min-h-0 w-48 shrink-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-muted/20 sm:w-56">
           <div className="relative shrink-0 border-b border-border/60 p-2">
             <Search className="absolute top-1/2 left-4 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -446,7 +435,7 @@ export function ItemsDatEditor({
           />
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/60">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/60">
           {selectedItem ? (
             <div className="tools-scroll flex-1 overflow-y-auto p-5">
               <ItemEditorForm

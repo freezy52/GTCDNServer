@@ -920,14 +920,24 @@ function AdminPageContent() {
     setFileActionsKey(null)
 
     try {
-      const response = await fetch(
-        `/api/admin/download?key=${encodeURIComponent(file.key)}`,
-        { cache: "no-store" }
-      )
+      const publicUrl = buildPublicFileUrl(file.key)
+      const privateUrl = `/api/admin/download?key=${encodeURIComponent(file.key)}`
+
+      let response = publicUrl
+        ? await fetch(publicUrl, { cache: "no-store" })
+        : null
+
+      if (!response?.ok) {
+        response = await fetch(privateUrl, { cache: "no-store" })
+      }
 
       if (!response.ok) {
         throw new Error("Failed to fetch items.dat")
       }
+
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve())
+      })
 
       const buffer = new Uint8Array(await response.arrayBuffer())
       const decoded = decodeItemsDat(buffer)
@@ -1386,7 +1396,7 @@ function AdminPageContent() {
                 </div>
               </div>
             ) : itemsEditorFile ? (
-              <div className="h-[70vh]">
+              <div className="flex h-[70vh] min-h-0 overflow-hidden">
                 <ItemsDatEditor
                   initialFile={itemsEditorFile}
                   allowFileLoad={false}
