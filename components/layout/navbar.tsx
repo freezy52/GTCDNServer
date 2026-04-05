@@ -16,6 +16,7 @@ import {
 import { useEffect, useRef, useState } from "react"
 
 import { Button, buttonVariants } from "@/components/ui/button"
+import { ServerStatusBadge } from "@/components/layout/tools/server-status-card"
 import { cn } from "@/lib/utils"
 
 interface NavbarProps {
@@ -110,6 +111,7 @@ export default function Navbar({ adminProfile }: NavbarProps) {
             >
               Tools
             </Link>
+            <ServerStatusBadge className="ml-2" />
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
