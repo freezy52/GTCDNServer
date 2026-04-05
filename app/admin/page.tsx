@@ -64,7 +64,7 @@ import {
   isDatFileName,
   normalizePath,
 } from "@/lib/admin-page"
-import { decodeItemsDat } from "@/lib/items-dat-helper"
+import { decodeItemsDat, protonHash } from "@/lib/items-dat-helper"
 import type { FolderOption, StorageObject } from "@/lib/storage"
 
 function uploadToSignedUrl(
