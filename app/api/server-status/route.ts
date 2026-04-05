@@ -44,35 +44,34 @@ function probeUdpPort() {
       })
     })
 
-    socket.connect(PORT, HOST, (connectError) => {
-      if (connectError) {
-        finish({
-          status: "error",
-          detail: "Socket connection setup failed.",
-          checkedAt,
+    try {
+      socket.connect(PORT, HOST, () => {
+        socket.send(PAYLOAD, (sendError) => {
+          if (sendError) {
+            finish({
+              status: "error",
+              detail: "UDP probe could not be sent.",
+              checkedAt,
+            })
+            return
+          }
+
+          setTimeout(() => {
+            finish({
+              status: "reachable",
+              detail: "No immediate UDP rejection was received.",
+              checkedAt,
+            })
+          }, TIMEOUT_MS)
         })
-        return
-      }
-
-      socket.send(PAYLOAD, (sendError) => {
-        if (sendError) {
-          finish({
-            status: "error",
-            detail: "UDP probe could not be sent.",
-            checkedAt,
-          })
-          return
-        }
-
-        setTimeout(() => {
-          finish({
-            status: "reachable",
-            detail: "No immediate UDP rejection was received.",
-            checkedAt,
-          })
-        }, TIMEOUT_MS)
       })
-    })
+    } catch {
+      finish({
+        status: "error",
+        detail: "Socket connection setup failed.",
+        checkedAt,
+      })
+    }
   })
 }
 
