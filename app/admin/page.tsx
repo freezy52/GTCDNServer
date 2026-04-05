@@ -1017,15 +1017,16 @@ function AdminPageContent() {
     const cacheFolder = normalizePath(
       normalizedFolder ? `cache/${normalizedFolder}` : "cache"
     )
+    const targetKey = `${cacheFolder ? `${cacheFolder}/` : ""}${file.name}`
     const uploadTarget = await fetchJson<UploadDirectResponse>(
       "/api/admin/upload/url",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          key: `${cacheFolder ? `${cacheFolder}/` : ""}${file.name}`,
+          key: targetKey,
           contentType: file.type || "application/octet-stream",
-          conflictAction: "rename",
+          conflictAction: "replace",
         }),
       }
     )
@@ -1047,7 +1048,10 @@ function AdminPageContent() {
     })
 
     return {
-      storedPath: uploadTarget.key.replace(/^cache\/+/, ""),
+      storedPath:
+        normalizedFolder === "game"
+          ? file.name
+          : uploadTarget.key.replace(/^cache\/+/, ""),
       hash: uploadedHash,
     }
   }
