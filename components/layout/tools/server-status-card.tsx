@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react"
 import { Activity, LoaderCircle, RefreshCw, Wifi, WifiOff } from "lucide-react"
 
+import { cn } from "@/lib/utils"
+
 type ServerStatusResponse = {
   host: string
   port: number
@@ -29,7 +31,7 @@ function formatCheckedAt(value: string) {
   }).format(date)
 }
 
-export function ServerStatusCard({ compact = false }: { compact?: boolean }) {
+function useServerStatus() {
   const [data, setData] = useState<ServerStatusResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -81,6 +83,32 @@ export function ServerStatusCard({ compact = false }: { compact?: boolean }) {
     }
   }, [])
 
+  const refresh = async () => {
+    setRefreshing(true)
+
+    try {
+      const response = await fetch("/api/server-status", {
+        cache: "no-store",
+      })
+      const payload = (await response.json()) as ServerStatusResponse
+
+      if (!response.ok) {
+        throw new Error(payload.detail || "Manual refresh failed.")
+      }
+
+      setData(payload)
+      setError(null)
+    } catch (refreshError) {
+      setError(
+        refreshError instanceof Error
+          ? refreshError.message
+          : "Manual refresh failed."
+      )
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
   const status = data?.status ?? (error ? "error" : "reachable")
   const isReachable = status === "reachable"
   const StatusIcon =
@@ -89,6 +117,53 @@ export function ServerStatusCard({ compact = false }: { compact?: boolean }) {
       : isReachable
         ? Wifi
         : WifiOff
+
+  return {
+    data,
+    error,
+    loading,
+    refreshing,
+    status,
+    isReachable,
+    StatusIcon,
+    refresh,
+  }
+}
+
+export function ServerStatusBadge({
+  className,
+}: {
+  className?: string
+}) {
+  const { loading, refreshing, isReachable, StatusIcon, refresh } =
+    useServerStatus()
+
+  return (
+    <button
+      type="button"
+      onClick={() => void refresh()}
+      className={cn(
+        "hidden h-9 items-center gap-2 rounded-xl border px-3 text-xs font-medium transition-colors md:inline-flex",
+        isReachable
+          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/15"
+          : "border-rose-500/25 bg-rose-500/10 text-rose-600 hover:bg-rose-500/15",
+        className
+      )}
+      title="Refresh server status"
+      aria-label="Refresh server status"
+    >
+      <StatusIcon
+        className={cn("size-3.5", (loading || refreshing) && "animate-spin")}
+        strokeWidth={1.9}
+      />
+      <span>{loading ? "Checking..." : isReachable ? "Server Open" : "Server Down"}</span>
+    </button>
+  )
+}
+
+export function ServerStatusCard({ compact = false }: { compact?: boolean }) {
+  const { data, error, loading, refreshing, isReachable, StatusIcon, refresh } =
+    useServerStatus()
 
   return (
     <div
@@ -123,31 +198,7 @@ export function ServerStatusCard({ compact = false }: { compact?: boolean }) {
             </div>
             <button
               type="button"
-              onClick={async () => {
-                setRefreshing(true)
-
-                try {
-                  const response = await fetch("/api/server-status", {
-                    cache: "no-store",
-                  })
-                  const payload = (await response.json()) as ServerStatusResponse
-
-                  if (!response.ok) {
-                    throw new Error(payload.detail || "Manual refresh failed.")
-                  }
-
-                  setData(payload)
-                  setError(null)
-                } catch (refreshError) {
-                  setError(
-                    refreshError instanceof Error
-                      ? refreshError.message
-                      : "Manual refresh failed."
-                  )
-                } finally {
-                  setRefreshing(false)
-                }
-              }}
+              onClick={() => void refresh()}
               className="rounded-lg border border-border/60 p-2 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
               aria-label="Refresh server status"
             >
