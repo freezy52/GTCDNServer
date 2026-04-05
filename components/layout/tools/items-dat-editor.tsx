@@ -28,6 +28,34 @@ type SavePayload = {
 }
 
 const ITEM_ROW_HEIGHT = 40
+const BASIC_FIELDS = new Set<keyof ItemEntry>([
+  "item_id",
+  "name",
+  "editable_type",
+  "item_category",
+  "action_type",
+  "hit_sound_type",
+  "item_kind",
+  "texture",
+  "texture_hash",
+  "texture_x",
+  "texture_y",
+  "collision_type",
+  "break_hits",
+  "rarity",
+  "max_amount",
+  "grow_time",
+  "seed_base",
+  "seed_overlay",
+  "tree_base",
+  "tree_leaves",
+  "extra_file",
+  "extra_options",
+  "punch_options",
+])
+
+type CreationPreset = "generic" | "block" | "seed" | "door" | "clothing"
+type ViewMode = "basic" | "advanced"
 
 const FIELD_GROUPS: { label: string; fields: (keyof ItemEntry)[] }[] = [
   {
@@ -57,7 +85,7 @@ const FIELD_GROUPS: { label: string; fields: (keyof ItemEntry)[] }[] = [
 ]
 
 function isReadOnly(field: keyof ItemEntry): boolean {
-  return field === "data_position_80"
+  return field === "data_position_80" || field === "item_id"
 }
 
 function fieldLabel(key: string) {
@@ -66,9 +94,11 @@ function fieldLabel(key: string) {
 
 const ItemEditorForm = memo(function ItemEditorForm({
   item,
+  viewMode,
   onChange,
 }: {
   item: ItemEntry
+  viewMode: ViewMode
   onChange: (updated: ItemEntry) => void
 }) {
   const handleChange = (key: keyof ItemEntry, value: string) => {
@@ -85,7 +115,11 @@ const ItemEditorForm = memo(function ItemEditorForm({
   return (
     <div className="space-y-6">
       {FIELD_GROUPS.map((group) => {
-        const visible = group.fields.filter((field) => item[field] !== undefined)
+        const visible = group.fields.filter(
+          (field) =>
+            item[field] !== undefined &&
+            (viewMode === "advanced" || BASIC_FIELDS.has(field))
+        )
         if (visible.length === 0) return null
 
         return (
@@ -201,6 +235,81 @@ const VirtualItemList = memo(function VirtualItemList({
   )
 })
 
+function getNextItemId(items: ItemEntry[]) {
+  return items.reduce((max, item) => Math.max(max, item.item_id), -1) + 1
+}
+
+function buildPresetItem({
+  base,
+  nextId,
+  preset,
+}: {
+  base: ItemEntry
+  nextId: number
+  preset: CreationPreset
+}): ItemEntry {
+  const nextItem: ItemEntry = {
+    ...base,
+    item_id: nextId,
+    name: `New Item ${nextId}`,
+    texture: base.texture || "unknown.rttex",
+    texture_hash: 0,
+    extra_file: "",
+    extra_file_hash: 0,
+    extra_options: "",
+    extra_options2: "",
+    punch_options: base.punch_options ?? "",
+    pet_name: "",
+    pet_prefix: "",
+    pet_suffix: "",
+    pet_ability: "",
+  }
+
+  switch (preset) {
+    case "block":
+      return {
+        ...nextItem,
+        name: `New Block ${nextId}`,
+        action_type: 0,
+        collision_type: 1,
+        break_hits: 6,
+        rarity: 1,
+      }
+    case "seed":
+      return {
+        ...nextItem,
+        name: `New Seedable Item ${nextId}`,
+        action_type: 0,
+        collision_type: 1,
+        break_hits: 6,
+        seed_base: Math.max(1, nextItem.seed_base),
+        seed_overlay: Math.max(1, nextItem.seed_overlay),
+        tree_base: Math.max(1, nextItem.tree_base),
+        tree_leaves: Math.max(1, nextItem.tree_leaves),
+        grow_time: Math.max(60, nextItem.grow_time),
+      }
+    case "door":
+      return {
+        ...nextItem,
+        name: `New Door ${nextId}`,
+        action_type: 3,
+        collision_type: 1,
+        break_hits: 6,
+      }
+    case "clothing":
+      return {
+        ...nextItem,
+        name: `New Clothing ${nextId}`,
+        action_type: 20,
+        collision_type: 0,
+        clothing_type: nextItem.clothing_type || 1,
+        max_amount: 1,
+      }
+    default:
+      return nextItem
+  }
+}
+
 export function ItemsDatEditor({
   initialFile = null,
   allowFileLoad = true,
@@ -225,6 +334,8 @@ export function ItemsDatEditor({
   const [loadedFile, setLoadedFile] = useState<LoadedItemsDatFile | null>(initialFile)
   const [searchRaw, setSearchRaw] = useState("")
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [viewMode, setViewMode] = useState<ViewMode>("basic")
+  const [creationPreset, setCreationPreset] = useState<CreationPreset>("generic")
   const [status, setStatus] = useState<Status>({ type: "idle" })
   const [loadStatus, setLoadStatus] = useState<Status>({ type: "idle" })
   const [edits, setEdits] = useState<Record<number, ItemEntry>>({})
@@ -278,24 +389,29 @@ export function ItemsDatEditor({
     }
   }, [applyLoadedFile])
 
+  const displayItems = useMemo(() => {
+    if (!loadedFile) return []
+    return loadedFile.data.items.map((item) => edits[item.item_id] ?? item)
+  }, [edits, loadedFile])
+
   const filteredItems = useMemo(() => {
     if (!loadedFile) return []
 
     const query = search.toLowerCase().trim()
-    if (!query) return loadedFile.data.items
+    if (!query) return displayItems
 
-    return loadedFile.data.items.filter(
+    return displayItems.filter(
       (item) => item.name.toLowerCase().includes(query) || String(item.item_id).includes(query)
     )
-  }, [loadedFile, search])
+  }, [displayItems, loadedFile, search])
 
   const itemLookup = useMemo(() => {
     if (!loadedFile) return new Map<number, ItemEntry>()
 
     return new Map(
-      loadedFile.data.items.map((item) => [item.item_id, item] as const)
+      displayItems.map((item) => [item.item_id, item] as const)
     )
-  }, [loadedFile])
+  }, [displayItems, loadedFile])
 
   const selectedItem = useMemo(() => {
     if (!loadedFile || selectedId === null) return null
@@ -309,8 +425,63 @@ export function ItemsDatEditor({
   const editedIds = useMemo(() => new Set(Object.keys(edits).map(Number)), [edits])
 
   const handleItemChange = useCallback((updated: ItemEntry) => {
-    setEdits((current) => ({ ...current, [updated.item_id]: updated }))
-  }, [])
+    setEdits((current) => {
+      if (selectedId === null) return current
+      return { ...current, [selectedId]: updated }
+    })
+  }, [selectedId])
+
+  const handleCreateItem = useCallback((mode: "new" | "clone") => {
+    setLoadedFile((current) => {
+      if (!current) return current
+
+      const baseItem =
+        (selectedId !== null
+          ? edits[selectedId] ?? current.data.items.find((item) => item.item_id === selectedId)
+          : null) ??
+        current.data.items[0]
+
+      if (!baseItem) return current
+
+      const nextId = getNextItemId(current.data.items)
+      const nextItem =
+        mode === "clone"
+          ? {
+              ...baseItem,
+              item_id: nextId,
+              name: `${baseItem.name} Copy`,
+            }
+          : buildPresetItem({
+              base: baseItem,
+              nextId,
+              preset: creationPreset,
+            })
+
+      const nextItems = [...current.data.items, nextItem].sort(
+        (left, right) => left.item_id - right.item_id
+      )
+
+      window.requestAnimationFrame(() => {
+        setSelectedId(nextId)
+        setStatus({
+          type: "success",
+          message:
+            mode === "clone"
+              ? `Cloned item into #${nextId}`
+              : `Created ${creationPreset} item #${nextId}`,
+        })
+      })
+
+      return {
+        ...current,
+        data: {
+          ...current.data,
+          item_count: nextItems.length,
+          items: nextItems,
+        },
+      }
+    })
+  }, [creationPreset, edits, selectedId])
 
   const handleReset = useCallback(() => {
     setLoadedFile(null)
@@ -330,6 +501,7 @@ export function ItemsDatEditor({
     try {
       const merged: ItemsDat = {
         ...loadedFile.data,
+        item_count: loadedFile.data.items.length,
         items: loadedFile.data.items.map((item) => edits[item.item_id] ?? item),
       }
       const encoded = encodeItemsDat(merged)
@@ -409,6 +581,48 @@ export function ItemsDatEditor({
         </div>
 
         <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-2 py-1.5">
+            <label className="text-xs text-muted-foreground">View</label>
+            <select
+              value={viewMode}
+              onChange={(event) => setViewMode(event.target.value as ViewMode)}
+              className="bg-transparent text-xs font-medium text-foreground outline-none"
+            >
+              <option value="basic">Basic</option>
+              <option value="advanced">Advanced</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-2 py-1.5">
+            <label className="text-xs text-muted-foreground">Preset</label>
+            <select
+              value={creationPreset}
+              onChange={(event) =>
+                setCreationPreset(event.target.value as CreationPreset)
+              }
+              className="bg-transparent text-xs font-medium text-foreground outline-none"
+            >
+              <option value="generic">Generic</option>
+              <option value="block">Block</option>
+              <option value="seed">Seedable</option>
+              <option value="door">Door</option>
+              <option value="clothing">Clothing</option>
+            </select>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleCreateItem("new")}
+            className="rounded-md border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            New item
+          </button>
+          <button
+            type="button"
+            onClick={() => handleCreateItem("clone")}
+            disabled={!selectedItem}
+            className="rounded-md border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Clone selected
+          </button>
           {allowFileLoad ? (
             <button
               type="button"
@@ -456,6 +670,7 @@ export function ItemsDatEditor({
               <ItemEditorForm
                 key={selectedItem.item_id}
                 item={selectedItem}
+                viewMode={viewMode}
                 onChange={handleItemChange}
               />
             </div>
