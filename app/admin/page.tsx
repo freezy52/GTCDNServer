@@ -976,7 +976,10 @@ function AdminPageContent() {
       }
     )
 
-    const uploadFile = new File([encoded], fileName, {
+    const uploadBytes = new Uint8Array(encoded.byteLength)
+    uploadBytes.set(encoded)
+
+    const uploadFile = new File([uploadBytes], fileName, {
       type: "application/octet-stream",
     })
 
