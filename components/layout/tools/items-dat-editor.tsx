@@ -92,12 +92,6 @@ function fieldLabel(key: string) {
   return key.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
-function hashTextValue(value: string) {
-  const normalized = value.trim()
-  if (!normalized) return 0
-  return protonHash(new TextEncoder().encode(normalized))
-}
-
 const ItemEditorForm = memo(function ItemEditorForm({
   item,
   viewMode,
@@ -107,6 +101,9 @@ const ItemEditorForm = memo(function ItemEditorForm({
   viewMode: ViewMode
   onChange: (updated: ItemEntry) => void
 }) {
+  const textureFileInputRef = useRef<HTMLInputElement>(null)
+  const extraFileInputRef = useRef<HTMLInputElement>(null)
+
   const handleChange = (key: keyof ItemEntry, value: string) => {
     const current = item[key]
     const nextItem = { ...item }
@@ -119,16 +116,35 @@ const ItemEditorForm = memo(function ItemEditorForm({
 
     ;(nextItem as Record<keyof ItemEntry, unknown>)[key] = value
 
-    if (key === "texture") {
-      nextItem.texture_hash = hashTextValue(value)
-    }
-
-    if (key === "extra_file") {
-      nextItem.extra_file_hash = hashTextValue(value)
-    }
-
     onChange(nextItem)
   }
+
+  const handleHashFileSelect = useCallback(
+    (target: "texture" | "extra_file", file: File | null) => {
+      if (!file) return
+
+      const reader = new FileReader()
+      reader.readAsArrayBuffer(file)
+      reader.onload = (event) => {
+        try {
+          const buffer = new Uint8Array(event.target?.result as ArrayBuffer)
+          const hash = protonHash(buffer)
+
+          onChange({
+            ...item,
+            [target]: file.name,
+            [target === "texture" ? "texture_hash" : "extra_file_hash"]: hash,
+          })
+        } catch {
+          onChange({
+            ...item,
+            [target]: file.name,
+          })
+        }
+      }
+    },
+    [item, onChange]
+  )
 
   return (
     <div className="space-y-6">
@@ -171,14 +187,56 @@ const ItemEditorForm = memo(function ItemEditorForm({
                       }`}
                     />
                     {field === "texture" ? (
-                      <p className="text-[11px] text-muted-foreground">
-                        Texture Hash otomatik hesaplanir.
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <input
+                          ref={textureFileInputRef}
+                          type="file"
+                          className="hidden"
+                          onChange={(event) => {
+                            handleHashFileSelect(
+                              "texture",
+                              event.target.files?.[0] ?? null
+                            )
+                            event.target.value = ""
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => textureFileInputRef.current?.click()}
+                          className="text-[11px] font-medium text-primary hover:underline"
+                        >
+                          RTTEX sec ve dogru hash doldur
+                        </button>
+                        <p className="text-[11px] text-muted-foreground">
+                          Dosya iceriginden hesaplanir.
+                        </p>
+                      </div>
                     ) : null}
                     {field === "extra_file" ? (
-                      <p className="text-[11px] text-muted-foreground">
-                        Extra File Hash otomatik hesaplanir.
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <input
+                          ref={extraFileInputRef}
+                          type="file"
+                          className="hidden"
+                          onChange={(event) => {
+                            handleHashFileSelect(
+                              "extra_file",
+                              event.target.files?.[0] ?? null
+                            )
+                            event.target.value = ""
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => extraFileInputRef.current?.click()}
+                          className="text-[11px] font-medium text-primary hover:underline"
+                        >
+                          Dosya sec ve hash doldur
+                        </button>
+                        <p className="text-[11px] text-muted-foreground">
+                          Dosya iceriginden hesaplanir.
+                        </p>
+                      </div>
                     ) : null}
                   </div>
                 )
