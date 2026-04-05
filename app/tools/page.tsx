@@ -18,7 +18,6 @@ import { HashTool } from "@/components/layout/tools/hash-tool"
 import { EditorTool } from "@/components/layout/tools/editor-tool"
 import { RttexTool } from "@/components/layout/tools/rttex-tool"
 import { ResizeImageTool } from "@/components/layout/tools/resize-image-tool"
-import { ServerStatusCard } from "@/components/layout/tools/server-status-card"
 
 // ─── nav config ──────────────────────────────────────────────────────────────
 
@@ -160,8 +159,6 @@ export default function ToolsPage() {
                   })}
                 </div>
               ))}
-
-              <ServerStatusCard />
             </div>
           </motion.aside>
         </div>
@@ -175,10 +172,6 @@ export default function ToolsPage() {
         >
           <div className="flex min-h-0 flex-1 flex-col p-4 md:pl-0">
             <div className="flex min-h-0 flex-1 flex-col rounded-2xl border border-border/60 bg-card shadow-[0_8px_32px_-8px_color-mix(in_oklch,var(--color-primary)_18%,black_18%)]">
-              <div className="border-b border-border/60 px-5 py-4 md:hidden">
-                <ServerStatusCard compact />
-              </div>
-
               {/* panel header */}
               <div className="shrink-0 border-b border-border/60 px-5 py-4 md:px-7 md:py-5">
                 <div className="flex items-center gap-3">
