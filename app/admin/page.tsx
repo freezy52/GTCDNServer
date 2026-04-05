@@ -25,6 +25,10 @@ import ChangePasswordModal from "@/components/layout/change-password-modal"
 import Navbar from "@/components/layout/navbar"
 import RenameFileModal from "@/components/layout/rename-file-modal"
 import RenameFolderModal from "@/components/layout/rename-folder-modal"
+import {
+  ItemsDatEditor,
+  type LoadedItemsDatFile,
+} from "@/components/layout/tools/items-dat-editor"
 import UploadConflictModal from "@/components/layout/upload-conflict-modal"
 import UploadModal from "@/components/layout/upload-modal"
 import { Button } from "@/components/ui/button"
@@ -162,6 +166,10 @@ function AdminPageContent() {
   const [changingPassword, setChangingPassword] = useState(false)
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [howToUseModalOpen, setHowToUseModalOpen] = useState(false)
+  const [itemsEditorTarget, setItemsEditorTarget] = useState<StorageObject | null>(null)
+  const [itemsEditorFile, setItemsEditorFile] = useState<LoadedItemsDatFile | null>(null)
+  const [itemsEditorLoading, setItemsEditorLoading] = useState(false)
+  const [itemsEditorError, setItemsEditorError] = useState<string | null>(null)
   const adminDataCacheRef = useRef(new Map<string, AdminPageData>())
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
@@ -904,6 +912,89 @@ function AdminPageContent() {
     })
   }
 
+  async function openItemsEditor(file: StorageObject) {
+    setItemsEditorTarget(file)
+    setItemsEditorFile(null)
+    setItemsEditorError(null)
+    setItemsEditorLoading(true)
+    setFileActionsKey(null)
+
+    try {
+      const response = await fetch(
+        `/api/admin/download?key=${encodeURIComponent(file.key)}`,
+        { cache: "no-store" }
+      )
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch items.dat")
+      }
+
+      const buffer = new Uint8Array(await response.arrayBuffer())
+      const decoded = decodeItemsDat(buffer)
+
+      setItemsEditorFile({
+        fileName: file.name,
+        data: decoded,
+      })
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to open items.dat"
+      setItemsEditorError(message)
+      goeyToast.error("Editor unavailable.", {
+        description: message,
+      })
+    } finally {
+      setItemsEditorLoading(false)
+    }
+  }
+
+  async function handleSaveItemsEditor({
+    encoded,
+    hash,
+    fileName,
+    editedCount,
+  }: {
+    encoded: Uint8Array
+    hash: number
+    fileName: string
+    editedCount: number
+  }) {
+    if (!itemsEditorTarget) {
+      throw new Error("No items.dat file selected")
+    }
+
+    const uploadTarget = await fetchJson<UploadDirectResponse>(
+      "/api/admin/upload/url",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          key: itemsEditorTarget.key,
+          contentType: "application/octet-stream",
+          conflictAction: "replace",
+        }),
+      }
+    )
+
+    const uploadFile = new File([encoded], fileName, {
+      type: "application/octet-stream",
+    })
+
+    await uploadToSignedUrl(uploadTarget.uploadUrl, uploadFile)
+    await fetchJson("/api/admin/upload/complete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key: uploadTarget.key }),
+    })
+    await refresh()
+
+    goeyToast.success("items.dat saved.", {
+      description: `"${itemsEditorTarget.name}" updated with ${editedCount} edits (hash: ${hash >>> 0}).`,
+    })
+
+    return `Saved to cache - hash: ${hash >>> 0}`
+  }
+
   function openRenameModal(file: StorageObject) {
     setRenameTarget(file)
     setRenameName(file.name)
@@ -1245,6 +1336,70 @@ function AdminPageContent() {
         onSubmit={handleRenameFolder}
       />
 
+      <Modal
+        open={!!itemsEditorTarget}
+        onOpenChange={(open) => {
+          if (open) return
+          setItemsEditorTarget(null)
+          setItemsEditorFile(null)
+          setItemsEditorLoading(false)
+          setItemsEditorError(null)
+        }}
+        dismissible={!itemsEditorLoading}
+      >
+        <ModalContent className="max-w-7xl">
+          <ModalHeader>
+            <div className="space-y-2">
+              <ModalTitle>Edit items.dat</ModalTitle>
+              <ModalDescription>
+                {itemsEditorTarget
+                  ? `Editing ${itemsEditorTarget.name} directly from cache.`
+                  : "Load an items.dat file from cache and save it back in place."}
+              </ModalDescription>
+            </div>
+
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setItemsEditorTarget(null)
+                setItemsEditorFile(null)
+                setItemsEditorLoading(false)
+                setItemsEditorError(null)
+              }}
+              disabled={itemsEditorLoading}
+            >
+              Close
+            </Button>
+          </ModalHeader>
+
+          <ModalBody className="mt-4">
+            {itemsEditorLoading ? (
+              <div className="flex h-[70vh] items-center justify-center">
+                <div className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                  <LoaderCircle className="size-4 animate-spin" />
+                  <span>Loading items.dat...</span>
+                </div>
+              </div>
+            ) : itemsEditorFile ? (
+              <div className="h-[70vh]">
+                <ItemsDatEditor
+                  initialFile={itemsEditorFile}
+                  allowFileLoad={false}
+                  saveLabel="Save to cache"
+                  onSave={handleSaveItemsEditor}
+                />
+              </div>
+            ) : (
+              <div className="flex h-[28vh] items-center justify-center rounded-xl border border-dashed border-border bg-muted/20 px-6 text-center text-sm text-muted-foreground">
+                {itemsEditorError ?? "This file could not be opened."}
+              </div>
+            )}
+          </ModalBody>
+        </ModalContent>
+      </Modal>
+
       <Modal open={moveModalOpen} onOpenChange={setMoveModalOpen}>
         <ModalContent>
           <ModalHeader>
@@ -1355,7 +1510,8 @@ function AdminPageContent() {
               <p className="text-sm font-medium text-foreground">Managing files</p>
               <p className="text-sm text-muted-foreground">
                 Hover over a file and click the <span className="font-medium text-foreground">...</span> menu to rename,
-                move, download, or delete it. Folders can be navigated by clicking their name.
+                move, download, edit <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">items.dat</code>,
+                or delete it. Folders can be navigated by clicking their name.
               </p>
             </div>
             <div className="space-y-1.5">
@@ -1775,6 +1931,16 @@ function AdminPageContent() {
                                 <Download className="mr-2 size-3.5" />
                                 Download file
                               </button>
+                              {isDatFileName(file.name) ? (
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-popover-foreground transition-colors hover:bg-muted"
+                                  onClick={() => openItemsEditor(file)}
+                                >
+                                  <PencilLine className="mr-2 size-3.5" />
+                                  Edit
+                                </button>
+                              ) : null}
                               {isDatFileName(file.name) ? (
                                 <button
                                   type="button"
