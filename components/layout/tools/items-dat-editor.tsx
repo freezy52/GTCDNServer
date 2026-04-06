@@ -57,6 +57,47 @@ const BASIC_FIELDS = new Set<keyof ItemEntry>([
 type CreationPreset = "generic" | "block" | "seed" | "door" | "clothing"
 type ViewMode = "basic" | "advanced"
 type AssetField = "texture" | "extra_file"
+type ImportedJsonValue = string | number | null | undefined
+
+const ITEM_IMPORT_ALIAS_MAP: Partial<Record<keyof ItemEntry, string[]>> = {
+  name: ["name"],
+  texture: ["texture"],
+  texture_hash: ["texture_hash"],
+  texture_x: ["texture_x"],
+  texture_y: ["texture_y"],
+  collision_type: ["collision_type"],
+  break_hits: ["break_hits"],
+  rarity: ["rarity"],
+  max_amount: ["max_amount"],
+  extra_file: ["extra_file"],
+  extra_file_hash: ["extra_file_hash"],
+  audio_volume: ["audio_volume"],
+  pet_name: ["pet_name"],
+  pet_prefix: ["pet_prefix"],
+  pet_suffix: ["pet_suffix"],
+  pet_ability: ["pet_ability"],
+  seed_base: ["seed_base"],
+  seed_overlay: ["seed_overlay"],
+  tree_base: ["tree_base"],
+  tree_leaves: ["tree_leaves"],
+  grow_time: ["grow_time"],
+  extra_options: ["extra_options"],
+  texture2: ["texture2"],
+  extra_options2: ["extra_options2"],
+  punch_options: ["punch_options"],
+  editable_type: ["editable_type"],
+  item_category: ["item_category"],
+  action_type: ["action_type"],
+  hit_sound_type: ["hit_sound_type"],
+  item_kind: ["item_kind"],
+  val1: ["val1"],
+  spread_type: ["spread_type"],
+  is_stripey_wallpaper: ["is_stripey_wallpaper"],
+  drop_chance: ["drop_chance"],
+  clothing_type: ["clothing_type", "body_part_type"],
+  val2: ["val2"],
+  is_rayman: ["is_rayman"],
+}
 
 const FIELD_GROUPS: { label: string; fields: (keyof ItemEntry)[] }[] = [
   {
@@ -403,6 +444,79 @@ function getNextItemId(items: ItemEntry[]) {
   return items.reduce((max, item) => Math.max(max, item.item_id), -1) + 1
 }
 
+function readImportedValue(
+  record: Record<string, unknown>,
+  keys: string[]
+): ImportedJsonValue {
+  for (const key of keys) {
+    const value = record[key]
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      value === null ||
+      value === undefined
+    ) {
+      return value
+    }
+  }
+
+  return undefined
+}
+
+function applyImportedScalar(
+  target: ItemEntry,
+  key: keyof ItemEntry,
+  value: ImportedJsonValue
+) {
+  if (value === undefined || value === null) return
+
+  const current = target[key]
+
+  if (typeof current === "number") {
+    const next = Number(value)
+    if (!Number.isNaN(next)) {
+      ;(target as Record<keyof ItemEntry, unknown>)[key] = next
+    }
+    return
+  }
+
+  if (typeof current === "string") {
+    ;(target as Record<keyof ItemEntry, unknown>)[key] = String(value)
+  }
+}
+
+function buildImportedItem({
+  base,
+  nextId,
+  raw,
+}: {
+  base: ItemEntry
+  nextId: number
+  raw: unknown
+}) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Each imported item must be a JSON object")
+  }
+
+  const record = raw as Record<string, unknown>
+  const nextItem: ItemEntry = {
+    ...base,
+    item_id: nextId,
+    name:
+      typeof record.name === "string" && record.name.trim().length > 0
+        ? record.name
+        : `Imported Item ${nextId}`,
+  }
+
+  for (const [field, aliases] of Object.entries(ITEM_IMPORT_ALIAS_MAP) as Array<
+    [keyof ItemEntry, string[]]
+  >) {
+    applyImportedScalar(nextItem, field, readImportedValue(record, aliases))
+  }
+
+  return nextItem
+}
+
 function buildPresetItem({
   base,
   nextId,
@@ -512,6 +626,7 @@ export function ItemsDatEditor({
   const [loadStatus, setLoadStatus] = useState<Status>({ type: "idle" })
   const [edits, setEdits] = useState<Record<number, ItemEntry>>({})
   const [saving, setSaving] = useState(false)
+  const [importText, setImportText] = useState("")
   const search = useDeferredValue(searchRaw)
 
   useEffect(() => {
@@ -704,6 +819,78 @@ export function ItemsDatEditor({
     }
   }, [edits, loadedFile, onSave])
 
+  const handleImportJson = useCallback(() => {
+    setLoadedFile((current) => {
+      if (!current) return current
+
+      const trimmed = importText.trim()
+      if (!trimmed) {
+        setStatus({
+          type: "error",
+          message: "Paste a JSON object or array first",
+        })
+        return current
+      }
+
+      try {
+        const parsed = JSON.parse(trimmed) as unknown
+        const importedItems = Array.isArray(parsed) ? parsed : [parsed]
+        if (importedItems.length === 0) {
+          throw new Error("Import array is empty")
+        }
+
+        const baseItem =
+          (selectedId !== null
+            ? edits[selectedId] ??
+              current.data.items.find((item) => item.item_id === selectedId)
+            : null) ?? current.data.items[0]
+
+        if (!baseItem) {
+          throw new Error("No base item available for import")
+        }
+
+        let nextId = getNextItemId(current.data.items)
+        const createdItems = importedItems.map((raw) =>
+          buildImportedItem({
+            base: { ...baseItem },
+            nextId: nextId++,
+            raw,
+          })
+        )
+
+        const nextItems = [...current.data.items, ...createdItems].sort(
+          (left, right) => left.item_id - right.item_id
+        )
+        const firstImportedId = createdItems[0]?.item_id ?? null
+
+        window.requestAnimationFrame(() => {
+          setSelectedId(firstImportedId)
+          setImportText("")
+          setStatus({
+            type: "success",
+            message: `${createdItems.length} item imported`,
+          })
+        })
+
+        return {
+          ...current,
+          data: {
+            ...current.data,
+            item_count: nextItems.length,
+            items: nextItems,
+          },
+        }
+      } catch (error) {
+        setStatus({
+          type: "error",
+          message:
+            error instanceof Error ? error.message : "Failed to import JSON",
+        })
+        return current
+      }
+    })
+  }, [edits, importText, selectedId])
+
   if (!loadedFile) {
     return (
       <div className={cn("flex flex-col gap-6", className)}>
@@ -837,6 +1024,28 @@ export function ItemsDatEditor({
         </div>
 
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/60">
+          <div className="shrink-0 border-b border-border/60 bg-muted/20 p-3">
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold tracking-[0.14em] text-muted-foreground uppercase">
+                  JSON Import
+                </p>
+                <button
+                  type="button"
+                  onClick={handleImportJson}
+                  className="rounded-md border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                >
+                  Import JSON
+                </button>
+              </div>
+              <textarea
+                value={importText}
+                onChange={(event) => setImportText(event.target.value)}
+                placeholder='Paste a JSON item or array. "id" will be ignored and replaced automatically.'
+                className="min-h-28 w-full rounded-md border border-border/60 bg-background px-3 py-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary/30"
+              />
+            </div>
+          </div>
           {selectedItem ? (
             <div className="tools-scroll flex-1 overflow-y-auto p-5">
               <ItemEditorForm
