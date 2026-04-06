@@ -911,6 +911,19 @@ export function ItemsDatEditor({
               item.texture_hash = result.hash
             }
 
+            const texture2Name = getAssetFileName(item.texture2).toLowerCase()
+            const texture2File = fileLookup.get(texture2Name)
+            if (texture2File && item.texture2) {
+              const folder = getAssetTargetFolder(item.texture2)
+              const cacheKey = `texture2:${folder}:${texture2File.name.toLowerCase()}`
+              const uploaded =
+                uploadCache.get(cacheKey) ??
+                onAssetUpload("texture", texture2File, folder)
+              uploadCache.set(cacheKey, uploaded)
+              const result = await uploaded
+              item.texture2 = result.storedPath
+            }
+
             const extraName = getAssetFileName(item.extra_file).toLowerCase()
             const extraFile = fileLookup.get(extraName)
             if (extraFile && item.extra_file) {
