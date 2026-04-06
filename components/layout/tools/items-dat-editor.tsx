@@ -517,6 +517,35 @@ function buildImportedItem({
   return nextItem
 }
 
+function getBaseItemForImport({
+  data,
+  edits,
+  selectedId,
+}: {
+  data: ItemsDat
+  edits: Record<number, ItemEntry>
+  selectedId: number | null
+}) {
+  return (
+    (selectedId !== null
+      ? edits[selectedId] ?? data.items.find((item) => item.item_id === selectedId)
+      : null) ?? data.items[0] ?? null
+  )
+}
+
+function getAssetFileName(path: string) {
+  const normalized = path.replace(/\\/g, "/")
+  const parts = normalized.split("/")
+  return parts[parts.length - 1] ?? path
+}
+
+function getAssetTargetFolder(path: string) {
+  const normalized = path.replace(/\\/g, "/").replace(/^cache\/+/, "")
+  const lastSlash = normalized.lastIndexOf("/")
+  if (lastSlash <= 0) return "game"
+  return normalized.slice(0, lastSlash)
+}
+
 function buildPresetItem({
   base,
   nextId,
@@ -819,9 +848,9 @@ export function ItemsDatEditor({
     }
   }, [edits, loadedFile, onSave])
 
-  const handleImportJson = useCallback((rawText: string) => {
-    setLoadedFile((current) => {
-      if (!current) return current
+  const handleImportJson = useCallback(
+    async (rawText: string, assetFiles: File[] = []) => {
+      if (!loadedFile) return
 
       const trimmed = rawText.trim()
       if (!trimmed) {
@@ -829,7 +858,7 @@ export function ItemsDatEditor({
           type: "error",
           message: "Selected JSON file is empty",
         })
-        return current
+        return
       }
 
       try {
@@ -839,17 +868,17 @@ export function ItemsDatEditor({
           throw new Error("Import array is empty")
         }
 
-        const baseItem =
-          (selectedId !== null
-            ? edits[selectedId] ??
-              current.data.items.find((item) => item.item_id === selectedId)
-            : null) ?? current.data.items[0]
+        const baseItem = getBaseItemForImport({
+          data: loadedFile.data,
+          edits,
+          selectedId,
+        })
 
         if (!baseItem) {
           throw new Error("No base item available for import")
         }
 
-        let nextId = getNextItemId(current.data.items)
+        let nextId = getNextItemId(loadedFile.data.items)
         const createdItems = importedItems.map((raw) =>
           buildImportedItem({
             base: { ...baseItem },
@@ -858,52 +887,109 @@ export function ItemsDatEditor({
           })
         )
 
-        const nextItems = [...current.data.items, ...createdItems].sort(
+        if (assetFiles.length > 0 && onAssetUpload) {
+          const fileLookup = new Map(
+            assetFiles.map((file) => [file.name.toLowerCase(), file] as const)
+          )
+          const uploadCache = new Map<
+            string,
+            Promise<{ storedPath: string; hash: number }>
+          >()
+
+          for (const item of createdItems) {
+            const textureName = getAssetFileName(item.texture).toLowerCase()
+            const textureFile = fileLookup.get(textureName)
+            if (textureFile && item.texture) {
+              const folder = getAssetTargetFolder(item.texture)
+              const cacheKey = `texture:${folder}:${textureFile.name.toLowerCase()}`
+              const uploaded =
+                uploadCache.get(cacheKey) ??
+                onAssetUpload("texture", textureFile, folder)
+              uploadCache.set(cacheKey, uploaded)
+              const result = await uploaded
+              item.texture = result.storedPath
+              item.texture_hash = result.hash
+            }
+
+            const extraName = getAssetFileName(item.extra_file).toLowerCase()
+            const extraFile = fileLookup.get(extraName)
+            if (extraFile && item.extra_file) {
+              const folder = getAssetTargetFolder(item.extra_file)
+              const cacheKey = `extra_file:${folder}:${extraFile.name.toLowerCase()}`
+              const uploaded =
+                uploadCache.get(cacheKey) ??
+                onAssetUpload("extra_file", extraFile, folder)
+              uploadCache.set(cacheKey, uploaded)
+              const result = await uploaded
+              item.extra_file = result.storedPath
+              item.extra_file_hash = result.hash
+            }
+          }
+        }
+
+        const nextItems = [...loadedFile.data.items, ...createdItems].sort(
           (left, right) => left.item_id - right.item_id
         )
         const firstImportedId = createdItems[0]?.item_id ?? null
 
-        window.requestAnimationFrame(() => {
-          setSelectedId(firstImportedId)
-          setStatus({
-            type: "success",
-            message: `${createdItems.length} item imported from JSON`,
-          })
-        })
-
-        return {
-          ...current,
+        setLoadedFile({
+          ...loadedFile,
           data: {
-            ...current.data,
+            ...loadedFile.data,
             item_count: nextItems.length,
             items: nextItems,
           },
-        }
+        })
+        setSelectedId(firstImportedId)
+        setStatus({
+          type: "success",
+          message:
+            assetFiles.length > 0
+              ? `${createdItems.length} item imported with assets`
+              : `${createdItems.length} item imported from JSON`,
+        })
       } catch (error) {
         setStatus({
           type: "error",
           message:
             error instanceof Error ? error.message : "Failed to import JSON",
         })
-        return current
       }
-    })
-  }, [edits, selectedId])
+    },
+    [edits, loadedFile, onAssetUpload, selectedId]
+  )
 
-  const handleImportJsonFile = useCallback(
-    async (file: File | null) => {
-      if (!file) return
+  const handleImportBundleFiles = useCallback(
+    async (files: FileList | null) => {
+      if (!files || files.length === 0) return
+
+      const allFiles = Array.from(files)
+      const jsonFile =
+        allFiles.find((file) => file.name.toLowerCase().endsWith(".json")) ??
+        null
+
+      if (!jsonFile) {
+        setStatus({
+          type: "error",
+          message: "Select a JSON file together with any RTTEX files",
+        })
+        return
+      }
+
+      const assetFiles = allFiles.filter(
+        (file) => file !== jsonFile && file.name.toLowerCase().endsWith(".rttex")
+      )
 
       try {
-        const text = await file.text()
-        handleImportJson(text)
+        const text = await jsonFile.text()
+        await handleImportJson(text, assetFiles)
       } catch (error) {
         setStatus({
           type: "error",
           message:
             error instanceof Error
               ? error.message
-              : "Failed to read JSON import file",
+              : "Failed to read import files",
         })
       }
     },
@@ -996,10 +1082,11 @@ export function ItemsDatEditor({
           <input
             ref={jsonImportInputRef}
             type="file"
-            accept=".json,application/json"
+            accept=".json,.rttex,application/json"
+            multiple
             className="hidden"
             onChange={async (event) => {
-              await handleImportJsonFile(event.target.files?.[0] ?? null)
+              await handleImportBundleFiles(event.target.files)
               event.target.value = ""
             }}
           />
@@ -1008,7 +1095,7 @@ export function ItemsDatEditor({
             onClick={() => jsonImportInputRef.current?.click()}
             className="rounded-md border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
           >
-            Import JSON file
+            Import JSON + RTTEX
           </button>
           <button
             type="button"
