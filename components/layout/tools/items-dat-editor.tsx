@@ -626,8 +626,8 @@ export function ItemsDatEditor({
   const [loadStatus, setLoadStatus] = useState<Status>({ type: "idle" })
   const [edits, setEdits] = useState<Record<number, ItemEntry>>({})
   const [saving, setSaving] = useState(false)
-  const [importText, setImportText] = useState("")
   const search = useDeferredValue(searchRaw)
+  const jsonImportInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setLoadedFile(initialFile)
@@ -819,15 +819,15 @@ export function ItemsDatEditor({
     }
   }, [edits, loadedFile, onSave])
 
-  const handleImportJson = useCallback(() => {
+  const handleImportJson = useCallback((rawText: string) => {
     setLoadedFile((current) => {
       if (!current) return current
 
-      const trimmed = importText.trim()
+      const trimmed = rawText.trim()
       if (!trimmed) {
         setStatus({
           type: "error",
-          message: "Paste a JSON object or array first",
+          message: "Selected JSON file is empty",
         })
         return current
       }
@@ -865,10 +865,9 @@ export function ItemsDatEditor({
 
         window.requestAnimationFrame(() => {
           setSelectedId(firstImportedId)
-          setImportText("")
           setStatus({
             type: "success",
-            message: `${createdItems.length} item imported`,
+            message: `${createdItems.length} item imported from JSON`,
           })
         })
 
@@ -889,7 +888,27 @@ export function ItemsDatEditor({
         return current
       }
     })
-  }, [edits, importText, selectedId])
+  }, [edits, selectedId])
+
+  const handleImportJsonFile = useCallback(
+    async (file: File | null) => {
+      if (!file) return
+
+      try {
+        const text = await file.text()
+        handleImportJson(text)
+      } catch (error) {
+        setStatus({
+          type: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to read JSON import file",
+        })
+      }
+    },
+    [handleImportJson]
+  )
 
   if (!loadedFile) {
     return (
@@ -974,6 +993,23 @@ export function ItemsDatEditor({
           >
             New item
           </button>
+          <input
+            ref={jsonImportInputRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={async (event) => {
+              await handleImportJsonFile(event.target.files?.[0] ?? null)
+              event.target.value = ""
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => jsonImportInputRef.current?.click()}
+            className="rounded-md border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            Import JSON file
+          </button>
           <button
             type="button"
             onClick={() => handleCreateItem("clone")}
@@ -1024,28 +1060,6 @@ export function ItemsDatEditor({
         </div>
 
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/60">
-          <div className="shrink-0 border-b border-border/60 bg-muted/20 p-3">
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold tracking-[0.14em] text-muted-foreground uppercase">
-                  JSON Import
-                </p>
-                <button
-                  type="button"
-                  onClick={handleImportJson}
-                  className="rounded-md border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-                >
-                  Import JSON
-                </button>
-              </div>
-              <textarea
-                value={importText}
-                onChange={(event) => setImportText(event.target.value)}
-                placeholder='Paste a JSON item or array. "id" will be ignored and replaced automatically.'
-                className="min-h-28 w-full rounded-md border border-border/60 bg-background px-3 py-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary/30"
-              />
-            </div>
-          </div>
           {selectedItem ? (
             <div className="tools-scroll flex-1 overflow-y-auto p-5">
               <ItemEditorForm
