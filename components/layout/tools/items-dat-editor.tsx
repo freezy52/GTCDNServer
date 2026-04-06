@@ -546,6 +546,58 @@ function getAssetTargetFolder(path: string) {
   return normalized.slice(0, lastSlash)
 }
 
+function buildImportedSeedItem({
+  base,
+  itemId,
+  name,
+}: {
+  base: ItemEntry
+  itemId: number
+  name: string
+}): ItemEntry {
+  return {
+    ...base,
+    item_id: itemId,
+    name: `${name} Seed`,
+    editable_type: 1,
+    item_category: 1,
+    action_type: 19,
+    hit_sound_type: 0,
+    item_kind: 0,
+    texture: "",
+    texture_hash: 0,
+    val1: 0,
+    texture_x: 0,
+    texture_y: 0,
+    spread_type: 0,
+    is_stripey_wallpaper: 0,
+    collision_type: 1,
+    break_hits: 7,
+    drop_chance: 0,
+    clothing_type: 0,
+    rarity: 1,
+    max_amount: 250,
+    extra_file: "",
+    extra_file_hash: 0,
+    audio_volume: 0,
+    pet_name: "",
+    pet_prefix: "",
+    pet_suffix: "",
+    pet_ability: "",
+    seed_base: 0,
+    seed_overlay: 0,
+    tree_base: 0,
+    tree_leaves: 0,
+    grow_time: 0,
+    val2: 0,
+    is_rayman: 0,
+    extra_options: "",
+    texture2: "",
+    extra_options2: "",
+    punch_options: base.punch_options ?? "",
+  }
+}
+
 function buildPresetItem({
   base,
   nextId,
@@ -879,13 +931,23 @@ export function ItemsDatEditor({
         }
 
         let nextId = getNextItemId(loadedFile.data.items)
-        const createdItems = importedItems.map((raw) =>
-          buildImportedItem({
+        const createdItems: ItemEntry[] = []
+
+        for (const raw of importedItems) {
+          const importedItem = buildImportedItem({
             base: { ...baseItem },
-            nextId: nextId++,
+            nextId,
             raw,
           })
-        )
+          const seedItem = buildImportedSeedItem({
+            base: { ...baseItem },
+            itemId: nextId + 1,
+            name: importedItem.name,
+          })
+
+          createdItems.push(importedItem, seedItem)
+          nextId += 2
+        }
 
         if (assetFiles.length > 0 && onAssetUpload) {
           const fileLookup = new Map(
@@ -909,33 +971,6 @@ export function ItemsDatEditor({
               const result = await uploaded
               item.texture = result.storedPath
               item.texture_hash = result.hash
-            }
-
-            const texture2Name = getAssetFileName(item.texture2).toLowerCase()
-            const texture2File = fileLookup.get(texture2Name)
-            if (texture2File && item.texture2) {
-              const folder = getAssetTargetFolder(item.texture2)
-              const cacheKey = `texture2:${folder}:${texture2File.name.toLowerCase()}`
-              const uploaded =
-                uploadCache.get(cacheKey) ??
-                onAssetUpload("texture", texture2File, folder)
-              uploadCache.set(cacheKey, uploaded)
-              const result = await uploaded
-              item.texture2 = result.storedPath
-            }
-
-            const extraName = getAssetFileName(item.extra_file).toLowerCase()
-            const extraFile = fileLookup.get(extraName)
-            if (extraFile && item.extra_file) {
-              const folder = getAssetTargetFolder(item.extra_file)
-              const cacheKey = `extra_file:${folder}:${extraFile.name.toLowerCase()}`
-              const uploaded =
-                uploadCache.get(cacheKey) ??
-                onAssetUpload("extra_file", extraFile, folder)
-              uploadCache.set(cacheKey, uploaded)
-              const result = await uploaded
-              item.extra_file = result.storedPath
-              item.extra_file_hash = result.hash
             }
           }
         }
