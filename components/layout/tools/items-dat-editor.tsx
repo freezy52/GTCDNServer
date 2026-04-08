@@ -60,6 +60,7 @@ type AssetField = "texture" | "extra_file"
 type ImportedJsonValue = string | number | null | undefined
 
 const ITEM_IMPORT_ALIAS_MAP: Partial<Record<keyof ItemEntry, string[]>> = {
+  item_id: ["item_id", "id"],
   name: ["name"],
   texture: ["texture"],
   texture_hash: ["texture_hash"],
@@ -85,11 +86,11 @@ const ITEM_IMPORT_ALIAS_MAP: Partial<Record<keyof ItemEntry, string[]>> = {
   texture2: ["texture2"],
   extra_options2: ["extra_options2"],
   punch_options: ["punch_options"],
-  editable_type: ["editable_type"],
-  item_category: ["item_category"],
+  editable_type: ["editable_type", "type"],
+  item_category: ["item_category", "category"],
   action_type: ["action_type"],
   hit_sound_type: ["hit_sound_type"],
-  item_kind: ["item_kind"],
+  item_kind: ["item_kind", "material_type"],
   val1: ["val1"],
   spread_type: ["spread_type"],
   is_stripey_wallpaper: ["is_stripey_wallpaper"],
@@ -444,6 +445,16 @@ function getNextItemId(items: ItemEntry[]) {
   return items.reduce((max, item) => Math.max(max, item.item_id), -1) + 1
 }
 
+function getNextAvailableItemId(usedIds: Set<number>, startAt: number) {
+  let nextId = Math.max(0, startAt)
+
+  while (usedIds.has(nextId)) {
+    nextId += 1
+  }
+
+  return nextId
+}
+
 function readImportedValue(
   record: Record<string, unknown>,
   keys: string[]
@@ -488,10 +499,12 @@ function applyImportedScalar(
 function buildImportedItem({
   base,
   nextId,
+  usedIds,
   raw,
 }: {
   base: ItemEntry
   nextId: number
+  usedIds: Set<number>
   raw: unknown
 }) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
@@ -499,9 +512,14 @@ function buildImportedItem({
   }
 
   const record = raw as Record<string, unknown>
+  const requestedId = Number(readImportedValue(record, ITEM_IMPORT_ALIAS_MAP.item_id ?? []))
+  const resolvedId =
+    Number.isInteger(requestedId) && requestedId >= 0 && !usedIds.has(requestedId)
+      ? requestedId
+      : getNextAvailableItemId(usedIds, nextId)
   const nextItem: ItemEntry = {
     ...base,
-    item_id: nextId,
+    item_id: resolvedId,
     name:
       typeof record.name === "string" && record.name.trim().length > 0
         ? record.name
@@ -932,21 +950,25 @@ export function ItemsDatEditor({
 
         let nextId = getNextItemId(loadedFile.data.items)
         const createdItems: ItemEntry[] = []
+        const usedIds = new Set(loadedFile.data.items.map((item) => item.item_id))
 
         for (const raw of importedItems) {
           const importedItem = buildImportedItem({
             base: { ...baseItem },
             nextId,
+            usedIds,
             raw,
           })
+          usedIds.add(importedItem.item_id)
           const seedItem = buildImportedSeedItem({
             base: { ...baseItem },
-            itemId: nextId + 1,
+            itemId: getNextAvailableItemId(usedIds, importedItem.item_id + 1),
             name: importedItem.name,
           })
+          usedIds.add(seedItem.item_id)
 
           createdItems.push(importedItem, seedItem)
-          nextId += 2
+          nextId = getNextAvailableItemId(usedIds, seedItem.item_id + 1)
         }
 
         if (assetFiles.length > 0 && onAssetUpload) {
