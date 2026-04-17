@@ -11,6 +11,7 @@ import {
   protonHash,
   type ItemEntry,
   type ItemsDat,
+  type SeedColor,
 } from "@/lib/items-dat-helper"
 import { cn } from "@/lib/utils"
 import { DropZone, saveBlob, StatusBadge, type Status } from "./shared"
@@ -52,11 +53,22 @@ const BASIC_FIELDS = new Set<keyof ItemEntry>([
   "extra_file",
   "extra_options",
   "punch_options",
+  "seed_color",
+  "seed_overlay_color",
+  "data_position_80",
+  "data_version_12",
+  "int_version_13",
+  "int_version_14",
+  "data_version_15",
+  "str_version_15",
+  "str_version_16",
+  "int_version_17",
+  "int_version_18",
 ])
 
 type CreationPreset = "generic" | "block" | "seed" | "door" | "clothing"
 type ViewMode = "basic" | "advanced"
-type AssetField = "texture" | "extra_file"
+type AssetField = "texture" | "extra_file" | "renderer_file"
 type ImportedJsonValue = string | number | null | undefined
 
 const ITEM_IMPORT_ALIAS_MAP: Partial<Record<keyof ItemEntry, string[]>> = {
@@ -98,6 +110,8 @@ const ITEM_IMPORT_ALIAS_MAP: Partial<Record<keyof ItemEntry, string[]>> = {
   clothing_type: ["clothing_type", "body_part_type"],
   val2: ["val2"],
   is_rayman: ["is_rayman"],
+  str_version_16: ["str_version_16", "item_renderer"],
+  int_version_18: ["int_version_18", "item_renderer_hash"],
 }
 
 const FIELD_GROUPS: { label: string; fields: (keyof ItemEntry)[] }[] = [
@@ -123,16 +137,75 @@ const FIELD_GROUPS: { label: string; fields: (keyof ItemEntry)[] }[] = [
   },
   {
     label: "Seed / Grow",
-    fields: ["seed_base", "seed_overlay", "tree_base", "tree_leaves", "grow_time"],
+    fields: ["seed_base", "seed_overlay", "tree_base", "tree_leaves", "seed_color", "seed_overlay_color", "grow_time"],
+  },
+  {
+    label: "Renderer",
+    fields: ["str_version_16", "int_version_18"],
+  },
+  {
+    label: "Version / Raw",
+    fields: ["data_position_80", "data_version_12", "int_version_13", "int_version_14", "data_version_15", "str_version_15", "int_version_17"],
   },
 ]
+
+const FIELD_LABELS: Partial<Record<keyof ItemEntry, string>> = {
+  editable_type: "Type",
+  item_category: "Category",
+  item_kind: "Material Type",
+  spread_type: "Visual Effect Type",
+  clothing_type: "Body Part Type",
+  str_version_16: "Renderer XML",
+  int_version_18: "Renderer Hash",
+  data_position_80: "Raw Data (80 bytes)",
+  data_version_12: "Version 12 Data",
+  data_version_15: "Version 15 Data",
+  str_version_15: "Version 15 String",
+}
 
 function isReadOnly(field: keyof ItemEntry): boolean {
   return field === "data_position_80" || field === "item_id"
 }
 
 function fieldLabel(key: string) {
-  return key.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
+  return FIELD_LABELS[key as keyof ItemEntry]
+    ?? key.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+function getAssetValueField(target: AssetField): keyof ItemEntry {
+  if (target === "texture") return "texture"
+  if (target === "extra_file") return "extra_file"
+  return "str_version_16"
+}
+
+function getAssetHashField(target: AssetField): keyof ItemEntry {
+  if (target === "texture") return "texture_hash"
+  if (target === "extra_file") return "extra_file_hash"
+  return "int_version_18"
+}
+
+function parseImportedColor(value: unknown, fallback: SeedColor): SeedColor {
+  if (typeof value === "number") {
+    const normalized = value >>> 0
+    return {
+      a: (normalized >>> 24) & 0xff,
+      r: (normalized >>> 16) & 0xff,
+      g: (normalized >>> 8) & 0xff,
+      b: normalized & 0xff,
+    }
+  }
+
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const source = value as Partial<Record<keyof SeedColor, unknown>>
+    return {
+      a: Number(source.a ?? fallback.a),
+      r: Number(source.r ?? fallback.r),
+      g: Number(source.g ?? fallback.g),
+      b: Number(source.b ?? fallback.b),
+    }
+  }
+
+  return fallback
 }
 
 const ItemEditorForm = memo(function ItemEditorForm({
@@ -154,10 +227,14 @@ const ItemEditorForm = memo(function ItemEditorForm({
 }) {
   const textureFileInputRef = useRef<HTMLInputElement>(null)
   const extraFileInputRef = useRef<HTMLInputElement>(null)
+  const rendererFileInputRef = useRef<HTMLInputElement>(null)
   const [textureTargetFolder, setTextureTargetFolder] = useState(
     assetFolderOptions[0] ?? "game"
   )
   const [extraTargetFolder, setExtraTargetFolder] = useState(
+    assetFolderOptions[0] ?? "game"
+  )
+  const [rendererTargetFolder, setRendererTargetFolder] = useState(
     assetFolderOptions[0] ?? "game"
   )
   const [uploadingField, setUploadingField] = useState<AssetField | null>(null)
@@ -177,12 +254,35 @@ const ItemEditorForm = memo(function ItemEditorForm({
     onChange(nextItem)
   }
 
+  const handleColorChange = (
+    key: "seed_color" | "seed_overlay_color",
+    channel: keyof SeedColor,
+    value: string
+  ) => {
+    const current = item[key]
+    const nextColor = {
+      ...(current ?? { a: 255, r: 255, g: 255, b: 255 }),
+      [channel]: Number(value),
+    }
+
+    onChange({
+      ...item,
+      [key]: nextColor,
+    })
+  }
+
   const handleHashFileSelect = useCallback(
     async (target: AssetField, file: File | null) => {
       if (!file) return
 
       const targetFolder =
-        target === "texture" ? textureTargetFolder : extraTargetFolder
+        target === "texture"
+          ? textureTargetFolder
+          : target === "extra_file"
+            ? extraTargetFolder
+            : rendererTargetFolder
+      const valueField = getAssetValueField(target)
+      const hashField = getAssetHashField(target)
 
       setUploadingField(target)
 
@@ -194,22 +294,21 @@ const ItemEditorForm = memo(function ItemEditorForm({
           const uploaded = await onAssetUpload(target, file, targetFolder)
           onChange({
             ...item,
-            [target]: uploaded.storedPath,
-            [target === "texture" ? "texture_hash" : "extra_file_hash"]:
-              uploaded.hash,
+            [valueField]: uploaded.storedPath,
+            [hashField]: uploaded.hash,
           })
           return
         }
 
         onChange({
           ...item,
-          [target]: file.name,
-          [target === "texture" ? "texture_hash" : "extra_file_hash"]: hash,
+          [valueField]: file.name,
+          [hashField]: hash,
         })
       } catch {
         onChange({
           ...item,
-          [target]: file.name,
+          [valueField]: file.name,
         })
       } finally {
         setUploadingField(null)
@@ -220,6 +319,7 @@ const ItemEditorForm = memo(function ItemEditorForm({
       item,
       onAssetUpload,
       onChange,
+      rendererTargetFolder,
       textureTargetFolder,
     ]
   )
@@ -245,7 +345,7 @@ const ItemEditorForm = memo(function ItemEditorForm({
                 const readOnly = isReadOnly(field)
                 const displayValue =
                   value !== null && typeof value === "object"
-                    ? Object.values(value).join(",")
+                    ? JSON.stringify(value)
                     : String(value ?? "")
 
                 return (
@@ -253,17 +353,42 @@ const ItemEditorForm = memo(function ItemEditorForm({
                     <label className="text-xs font-medium text-muted-foreground">
                       {fieldLabel(field)}
                     </label>
-                    <input
-                      type="text"
-                      readOnly={readOnly}
-                      value={displayValue}
-                      onChange={(event) => {
-                        if (!readOnly) handleChange(field, event.target.value)
-                      }}
-                      className={`h-8 rounded-md border border-border/60 bg-muted/30 px-3 font-mono text-xs text-foreground outline-none transition-colors focus:border-primary focus:bg-card focus:ring-1 focus:ring-primary/30 ${
-                        readOnly ? "cursor-default opacity-50" : ""
-                      }`}
-                    />
+                    {field === "seed_color" || field === "seed_overlay_color" ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        {(["a", "r", "g", "b"] as const).map((channel) => (
+                          <label
+                            key={channel}
+                            className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-2 py-1"
+                          >
+                            <span className="w-4 text-[11px] uppercase text-muted-foreground">
+                              {channel}
+                            </span>
+                            <input
+                              type="number"
+                              min={0}
+                              max={255}
+                              value={item[field][channel]}
+                              onChange={(event) =>
+                                handleColorChange(field, channel, event.target.value)
+                              }
+                              className="h-7 min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none"
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    ) : (
+                      <input
+                        type="text"
+                        readOnly={readOnly}
+                        value={displayValue}
+                        onChange={(event) => {
+                          if (!readOnly) handleChange(field, event.target.value)
+                        }}
+                        className={`h-8 rounded-md border border-border/60 bg-muted/30 px-3 font-mono text-xs text-foreground outline-none transition-colors focus:border-primary focus:bg-card focus:ring-1 focus:ring-primary/30 ${
+                          readOnly ? "cursor-default opacity-50" : ""
+                        }`}
+                      />
+                    )}
                     {field === "texture" ? (
                       <div className="flex flex-wrap items-center gap-2">
                         <input
@@ -355,6 +480,52 @@ const ItemEditorForm = memo(function ItemEditorForm({
                           {onAssetUpload
                             ? "Secilen klasore yuklenir ve dosya iceriginden hash hesaplanir."
                             : "Dosya iceriginden hesaplanir."}
+                        </p>
+                      </div>
+                    ) : null}
+                    {field === "str_version_16" ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          ref={rendererFileInputRef}
+                          type="file"
+                          accept=".xml,text/xml,application/xml"
+                          className="hidden"
+                          onChange={async (event) => {
+                            await handleHashFileSelect(
+                              "renderer_file",
+                              event.target.files?.[0] ?? null
+                            )
+                            event.target.value = ""
+                          }}
+                        />
+                        {onAssetUpload ? (
+                          <select
+                            value={rendererTargetFolder}
+                            onChange={(event) =>
+                              setRendererTargetFolder(event.target.value)
+                            }
+                            className="rounded-md border border-border/60 bg-background px-2 py-1 text-[11px] text-foreground outline-none"
+                          >
+                            {assetFolderOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => rendererFileInputRef.current?.click()}
+                          className="text-[11px] font-medium text-primary hover:underline"
+                        >
+                          {uploadingField === "renderer_file"
+                            ? "Yukleniyor..."
+                            : onAssetUpload
+                              ? "XML sec, yukle, hash doldur"
+                              : "XML sec ve hash doldur"}
+                        </button>
+                        <p className="text-[11px] text-muted-foreground">
+                          XML secildiginde Renderer Hash otomatik hesaplanir.
                         </p>
                       </div>
                     ) : null}
@@ -530,6 +701,22 @@ function buildImportedItem({
     [keyof ItemEntry, string[]]
   >) {
     applyImportedScalar(nextItem, field, readImportedValue(record, aliases))
+  }
+
+  nextItem.seed_color = parseImportedColor(record.seed_color, nextItem.seed_color)
+  nextItem.seed_overlay_color = parseImportedColor(
+    record.seed_overlay_color,
+    nextItem.seed_overlay_color
+  )
+
+  const rendererCandidate =
+    typeof record.item_renderer === "string"
+      ? record.item_renderer
+      : typeof record.str_version_16 === "string"
+        ? record.str_version_16
+        : ""
+  if (rendererCandidate.toLowerCase().endsWith(".xml")) {
+    nextItem.str_version_16 = rendererCandidate
   }
 
   return nextItem
@@ -719,7 +906,7 @@ export function ItemsDatEditor({
   const [loadedFile, setLoadedFile] = useState<LoadedItemsDatFile | null>(initialFile)
   const [searchRaw, setSearchRaw] = useState("")
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [viewMode, setViewMode] = useState<ViewMode>("basic")
+  const [viewMode, setViewMode] = useState<ViewMode>("advanced")
   const [creationPreset, setCreationPreset] = useState<CreationPreset>("generic")
   const [status, setStatus] = useState<Status>({ type: "idle" })
   const [loadStatus, setLoadStatus] = useState<Status>({ type: "idle" })
@@ -993,6 +1180,20 @@ export function ItemsDatEditor({
               const result = await uploaded
               item.texture = result.storedPath
               item.texture_hash = result.hash
+            }
+
+            const rendererName = getAssetFileName(item.str_version_16 ?? "").toLowerCase()
+            const rendererFile = rendererName ? fileLookup.get(rendererName) : undefined
+            if (rendererFile && item.str_version_16) {
+              const folder = getAssetTargetFolder(item.str_version_16)
+              const cacheKey = `renderer:${folder}:${rendererFile.name.toLowerCase()}`
+              const uploaded =
+                uploadCache.get(cacheKey) ??
+                onAssetUpload("renderer_file", rendererFile, folder)
+              uploadCache.set(cacheKey, uploaded)
+              const result = await uploaded
+              item.str_version_16 = result.storedPath
+              item.int_version_18 = result.hash
             }
           }
         }

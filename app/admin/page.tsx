@@ -1009,7 +1009,7 @@ function AdminPageContent() {
   }
 
   async function handleUploadEditorAsset(
-    field: "texture" | "extra_file",
+    field: "texture" | "extra_file" | "renderer_file",
     file: File,
     targetFolder: string
   ) {
