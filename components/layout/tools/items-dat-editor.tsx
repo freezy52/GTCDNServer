@@ -84,6 +84,10 @@ function getRendererOptionLabel(path: string) {
     .replace(/^gamedata\/+/i, "")
 }
 
+function getRendererStoredValue(path: string) {
+  return getAssetFileName(path)
+}
+
 const ITEM_IMPORT_ALIAS_MAP: Partial<Record<keyof ItemEntry, string[]>> = {
   item_id: ["item_id", "id"],
   name: ["name"],
@@ -319,13 +323,19 @@ const ItemEditorForm = memo(function ItemEditorForm({
 
         onChange({
           ...item,
-          [valueField]: buildAssetPath(targetFolder, file.name),
+          [valueField]:
+            target === "renderer_file"
+              ? file.name
+              : buildAssetPath(targetFolder, file.name),
           [hashField]: hash,
         })
       } catch {
         onChange({
           ...item,
-          [valueField]: buildAssetPath(targetFolder, file.name),
+          [valueField]:
+            target === "renderer_file"
+              ? file.name
+              : buildAssetPath(targetFolder, file.name),
         })
       } finally {
         setUploadingField(null)
@@ -349,7 +359,7 @@ const ItemEditorForm = memo(function ItemEditorForm({
       const selected = await onSelectExistingRendererFile(selectedRendererFile)
       onChange({
         ...item,
-        str_version_16: selected.storedPath,
+        str_version_16: getRendererStoredValue(selected.storedPath),
         int_version_18: selected.hash,
       })
     } finally {
@@ -728,11 +738,7 @@ function isLegacyServerImport(record: Record<string, unknown>) {
 function normalizeImportedRendererPath(path: string) {
   const normalized = path.trim().replace(/\\/g, "/").replace(/^\/+/, "")
   if (!normalized) return normalized
-  if (normalized.includes("/")) return normalized
-  if (normalized.toLowerCase().endsWith(".xml")) {
-    return `${RENDERER_XML_FOLDER}/${normalized}`
-  }
-  return normalized
+  return getAssetFileName(normalized)
 }
 
 function buildImportedItem({
@@ -1269,14 +1275,14 @@ export function ItemsDatEditor({
             const rendererName = getAssetFileName(item.str_version_16 ?? "").toLowerCase()
             const rendererFile = rendererName ? fileLookup.get(rendererName) : undefined
             if (rendererFile && item.str_version_16) {
-              const folder = getAssetTargetFolder(item.str_version_16)
+              const folder = RENDERER_XML_FOLDER
               const cacheKey = `renderer:${folder}:${rendererFile.name.toLowerCase()}`
               const uploaded =
                 uploadCache.get(cacheKey) ??
                 onAssetUpload("renderer_file", rendererFile, folder)
               uploadCache.set(cacheKey, uploaded)
               const result = await uploaded
-              item.str_version_16 = result.storedPath
+              item.str_version_16 = getRendererStoredValue(result.storedPath)
               item.int_version_18 = result.hash
             }
           }

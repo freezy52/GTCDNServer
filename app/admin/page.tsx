@@ -1103,7 +1103,10 @@ function AdminPageContent() {
     })
 
     return {
-      storedPath: uploadTarget.key.replace(/^cache\/+/, ""),
+      storedPath:
+        field === "renderer_file"
+          ? file.name
+          : uploadTarget.key.replace(/^cache\/+/, ""),
       hash: uploadedHash,
     }
   }
@@ -1127,7 +1130,7 @@ function AdminPageContent() {
 
     const buffer = new Uint8Array(await response.arrayBuffer())
     return {
-      storedPath: normalizedKey,
+      storedPath: normalizedKey.split("/").pop() ?? normalizedKey,
       hash: protonHash(buffer),
     }
   }
