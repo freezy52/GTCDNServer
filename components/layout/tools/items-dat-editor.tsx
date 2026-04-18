@@ -70,10 +70,18 @@ type CreationPreset = "generic" | "block" | "seed" | "door" | "clothing"
 type ViewMode = "basic" | "advanced"
 type AssetField = "texture" | "extra_file" | "renderer_file"
 type ImportedJsonValue = string | number | null | undefined
+const RENDERER_XML_FOLDER = "GameData/ItemRenderers"
 
 function buildAssetPath(targetFolder: string, fileName: string) {
   const normalizedFolder = targetFolder.trim().replace(/^\/+|\/+$/g, "")
   return normalizedFolder ? `${normalizedFolder}/${fileName}` : fileName
+}
+
+function getRendererOptionLabel(path: string) {
+  return path
+    .replace(/^GameData\/ItemRenderers\/+/i, "")
+    .replace(/^game\/gamedata\/+/i, "")
+    .replace(/^gamedata\/+/i, "")
 }
 
 const ITEM_IMPORT_ALIAS_MAP: Partial<Record<keyof ItemEntry, string[]>> = {
@@ -245,9 +253,6 @@ const ItemEditorForm = memo(function ItemEditorForm({
   const [extraTargetFolder, setExtraTargetFolder] = useState(
     assetFolderOptions[0] ?? "game"
   )
-  const [rendererTargetFolder, setRendererTargetFolder] = useState(
-    assetFolderOptions[0] ?? "game"
-  )
   const [selectedRendererFile, setSelectedRendererFile] = useState("")
   const [uploadingField, setUploadingField] = useState<AssetField | null>(null)
 
@@ -292,7 +297,7 @@ const ItemEditorForm = memo(function ItemEditorForm({
           ? textureTargetFolder
           : target === "extra_file"
             ? extraTargetFolder
-            : rendererTargetFolder
+            : RENDERER_XML_FOLDER
       const valueField = getAssetValueField(target)
       const hashField = getAssetHashField(target)
 
@@ -331,7 +336,6 @@ const ItemEditorForm = memo(function ItemEditorForm({
       item,
       onAssetUpload,
       onChange,
-      rendererTargetFolder,
       textureTargetFolder,
     ]
   )
@@ -523,10 +527,10 @@ const ItemEditorForm = memo(function ItemEditorForm({
                               }
                               className="min-w-[220px] rounded-md border border-border/60 bg-background px-2 py-1 text-[11px] text-foreground outline-none"
                             >
-                              <option value="">gamedata icinden XML sec</option>
+                              <option value="">GameData/ItemRenderers icinden XML sec</option>
                               {rendererFileOptions.map((option) => (
                                 <option key={option} value={option}>
-                                  {option}
+                                  {getRendererOptionLabel(option)}
                                 </option>
                               ))}
                             </select>
@@ -556,21 +560,6 @@ const ItemEditorForm = memo(function ItemEditorForm({
                             event.target.value = ""
                           }}
                         />
-                        {onAssetUpload ? (
-                          <select
-                            value={rendererTargetFolder}
-                            onChange={(event) =>
-                              setRendererTargetFolder(event.target.value)
-                            }
-                            className="rounded-md border border-border/60 bg-background px-2 py-1 text-[11px] text-foreground outline-none"
-                          >
-                            {assetFolderOptions.map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                        ) : null}
                         <button
                           type="button"
                           onClick={() => rendererFileInputRef.current?.click()}
@@ -583,7 +572,7 @@ const ItemEditorForm = memo(function ItemEditorForm({
                               : "XML sec ve hash doldur"}
                         </button>
                         <p className="text-[11px] text-muted-foreground">
-                          XML secildiginde Renderer Hash otomatik hesaplanir.
+                          XML secildiginde Renderer Hash otomatik hesaplanir. Yeni XML yuklenirse otomatik GameData/ItemRenderers altina gider.
                         </p>
                         </div>
                       </div>
@@ -741,7 +730,7 @@ function normalizeImportedRendererPath(path: string) {
   if (!normalized) return normalized
   if (normalized.includes("/")) return normalized
   if (normalized.toLowerCase().endsWith(".xml")) {
-    return `gamedata/${normalized}`
+    return `${RENDERER_XML_FOLDER}/${normalized}`
   }
   return normalized
 }

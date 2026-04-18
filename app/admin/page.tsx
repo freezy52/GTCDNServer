@@ -212,12 +212,22 @@ function AdminPageContent() {
 
     void (async () => {
       try {
-        const xmlFiles = (await collectXmlFiles("gamedata")).toSorted(
-          (left, right) =>
-            left.localeCompare(right, undefined, { sensitivity: "base" })
+        let xmlFiles: string[] = []
+        try {
+          xmlFiles = await collectXmlFiles("GameData/ItemRenderers")
+        } catch {
+          try {
+            xmlFiles = await collectXmlFiles("game/gamedata")
+          } catch {
+            xmlFiles = await collectXmlFiles("gamedata")
+          }
+        }
+
+        const sortedXmlFiles = xmlFiles.toSorted((left, right) =>
+          left.localeCompare(right, undefined, { sensitivity: "base" })
         )
         if (!cancelled) {
-          setGamedataXmlFiles(xmlFiles)
+          setGamedataXmlFiles(sortedXmlFiles)
         }
       } catch {
         if (!cancelled) {
