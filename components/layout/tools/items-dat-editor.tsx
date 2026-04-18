@@ -71,6 +71,11 @@ type ViewMode = "basic" | "advanced"
 type AssetField = "texture" | "extra_file" | "renderer_file"
 type ImportedJsonValue = string | number | null | undefined
 
+function buildAssetPath(targetFolder: string, fileName: string) {
+  const normalizedFolder = targetFolder.trim().replace(/^\/+|\/+$/g, "")
+  return normalizedFolder ? `${normalizedFolder}/${fileName}` : fileName
+}
+
 const ITEM_IMPORT_ALIAS_MAP: Partial<Record<keyof ItemEntry, string[]>> = {
   item_id: ["item_id", "id"],
   name: ["name"],
@@ -212,12 +217,18 @@ const ItemEditorForm = memo(function ItemEditorForm({
   item,
   viewMode,
   assetFolderOptions,
+  rendererFileOptions,
+  onSelectExistingRendererFile,
   onAssetUpload,
   onChange,
 }: {
   item: ItemEntry
   viewMode: ViewMode
   assetFolderOptions: string[]
+  rendererFileOptions: string[]
+  onSelectExistingRendererFile?: (
+    key: string
+  ) => Promise<{ storedPath: string; hash: number }>
   onAssetUpload?: (
     field: AssetField,
     file: File,
@@ -237,6 +248,7 @@ const ItemEditorForm = memo(function ItemEditorForm({
   const [rendererTargetFolder, setRendererTargetFolder] = useState(
     assetFolderOptions[0] ?? "game"
   )
+  const [selectedRendererFile, setSelectedRendererFile] = useState("")
   const [uploadingField, setUploadingField] = useState<AssetField | null>(null)
 
   const handleChange = (key: keyof ItemEntry, value: string) => {
@@ -302,13 +314,13 @@ const ItemEditorForm = memo(function ItemEditorForm({
 
         onChange({
           ...item,
-          [valueField]: file.name,
+          [valueField]: buildAssetPath(targetFolder, file.name),
           [hashField]: hash,
         })
       } catch {
         onChange({
           ...item,
-          [valueField]: file.name,
+          [valueField]: buildAssetPath(targetFolder, file.name),
         })
       } finally {
         setUploadingField(null)
@@ -323,6 +335,23 @@ const ItemEditorForm = memo(function ItemEditorForm({
       textureTargetFolder,
     ]
   )
+
+  const handleExistingRendererSelect = useCallback(async () => {
+    if (!selectedRendererFile || !onSelectExistingRendererFile) return
+
+    setUploadingField("renderer_file")
+
+    try {
+      const selected = await onSelectExistingRendererFile(selectedRendererFile)
+      onChange({
+        ...item,
+        str_version_16: selected.storedPath,
+        int_version_18: selected.hash,
+      })
+    } finally {
+      setUploadingField(null)
+    }
+  }, [item, onChange, onSelectExistingRendererFile, selectedRendererFile])
 
   return (
     <div className="space-y-6">
@@ -484,7 +513,36 @@ const ItemEditorForm = memo(function ItemEditorForm({
                       </div>
                     ) : null}
                     {field === "str_version_16" ? (
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex flex-col gap-2">
+                        {rendererFileOptions.length > 0 && onSelectExistingRendererFile ? (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <select
+                              value={selectedRendererFile}
+                              onChange={(event) =>
+                                setSelectedRendererFile(event.target.value)
+                              }
+                              className="min-w-[220px] rounded-md border border-border/60 bg-background px-2 py-1 text-[11px] text-foreground outline-none"
+                            >
+                              <option value="">gamedata icinden XML sec</option>
+                              {rendererFileOptions.map((option) => (
+                                <option key={option} value={option}>
+                                  {option}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => void handleExistingRendererSelect()}
+                              disabled={!selectedRendererFile || uploadingField === "renderer_file"}
+                              className="text-[11px] font-medium text-primary hover:underline disabled:pointer-events-none disabled:opacity-50"
+                            >
+                              {uploadingField === "renderer_file"
+                                ? "Yukleniyor..."
+                                : "Secili XML'i kullan"}
+                            </button>
+                          </div>
+                        ) : null}
+                        <div className="flex flex-wrap items-center gap-2">
                         <input
                           ref={rendererFileInputRef}
                           type="file"
@@ -527,6 +585,7 @@ const ItemEditorForm = memo(function ItemEditorForm({
                         <p className="text-[11px] text-muted-foreground">
                           XML secildiginde Renderer Hash otomatik hesaplanir.
                         </p>
+                        </div>
                       </div>
                     ) : null}
                   </div>
@@ -667,6 +726,26 @@ function applyImportedScalar(
   }
 }
 
+function isLegacyServerImport(record: Record<string, unknown>) {
+  return (
+    "material_type" in record ||
+    "storage_type" in record ||
+    "visual_effect_type" in record ||
+    "body_part_type" in record ||
+    "item_renderer" in record
+  )
+}
+
+function normalizeImportedRendererPath(path: string) {
+  const normalized = path.trim().replace(/\\/g, "/").replace(/^\/+/, "")
+  if (!normalized) return normalized
+  if (normalized.includes("/")) return normalized
+  if (normalized.toLowerCase().endsWith(".xml")) {
+    return `gamedata/${normalized}`
+  }
+  return normalized
+}
+
 function buildImportedItem({
   base,
   nextId,
@@ -709,6 +788,16 @@ function buildImportedItem({
     nextItem.seed_overlay_color
   )
 
+  if (isLegacyServerImport(record)) {
+    applyImportedScalar(nextItem, "action_type", readImportedValue(record, ["action_type", "type"]))
+    applyImportedScalar(nextItem, "item_category", readImportedValue(record, ["item_category", "storage_type"]))
+    applyImportedScalar(nextItem, "item_kind", readImportedValue(record, ["item_kind", "material_type"]))
+    applyImportedScalar(nextItem, "spread_type", readImportedValue(record, ["spread_type", "visual_effect_type"]))
+    applyImportedScalar(nextItem, "clothing_type", readImportedValue(record, ["clothing_type", "body_part_type"]))
+    applyImportedScalar(nextItem, "val1", readImportedValue(record, ["val1", "cooking_time"]))
+    applyImportedScalar(nextItem, "val2", readImportedValue(record, ["val2", "reset_state_after"]))
+  }
+
   const rendererCandidate =
     typeof record.item_renderer === "string"
       ? record.item_renderer
@@ -716,7 +805,7 @@ function buildImportedItem({
         ? record.str_version_16
         : ""
   if (rendererCandidate.toLowerCase().endsWith(".xml")) {
-    nextItem.str_version_16 = rendererCandidate
+    nextItem.str_version_16 = normalizeImportedRendererPath(rendererCandidate)
   }
 
   return nextItem
@@ -884,6 +973,8 @@ export function ItemsDatEditor({
   emptyDescription,
   onSave,
   assetFolderOptions = ["game", "interface", "audio", "images"],
+  rendererFileOptions = [],
+  onSelectExistingRendererFile,
   onAssetUpload,
   className,
 }: {
@@ -896,6 +987,10 @@ export function ItemsDatEditor({
   emptyDescription?: ReactNode
   onSave?: (payload: SavePayload) => Promise<string | void> | string | void
   assetFolderOptions?: string[]
+  rendererFileOptions?: string[]
+  onSelectExistingRendererFile?: (
+    key: string
+  ) => Promise<{ storedPath: string; hash: number }>
   onAssetUpload?: (
     field: AssetField,
     file: File,
@@ -1425,6 +1520,8 @@ export function ItemsDatEditor({
                 item={selectedItem}
                 viewMode={viewMode}
                 assetFolderOptions={assetFolderOptions}
+                rendererFileOptions={rendererFileOptions}
+                onSelectExistingRendererFile={onSelectExistingRendererFile}
                 onAssetUpload={onAssetUpload}
                 onChange={handleItemChange}
               />

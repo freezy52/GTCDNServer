@@ -170,6 +170,7 @@ function AdminPageContent() {
   const [itemsEditorFile, setItemsEditorFile] = useState<LoadedItemsDatFile | null>(null)
   const [itemsEditorLoading, setItemsEditorLoading] = useState(false)
   const [itemsEditorError, setItemsEditorError] = useState<string | null>(null)
+  const [gamedataXmlFiles, setGamedataXmlFiles] = useState<string[]>([])
   const adminDataCacheRef = useRef(new Map<string, AdminPageData>())
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
@@ -185,6 +186,50 @@ function AdminPageContent() {
     input.setAttribute("webkitdirectory", "")
     input.setAttribute("directory", "")
   }, [uploadModalOpen])
+
+  useEffect(() => {
+    if (!itemsEditorTarget) {
+      setGamedataXmlFiles([])
+      return
+    }
+
+    let cancelled = false
+
+    async function collectXmlFiles(folderPath: string): Promise<string[]> {
+      const files = await fetchJson<StorageObject[]>(
+        `/api/admin/files?path=${encodeURIComponent(folderPath)}`
+      )
+      const xmlFiles = files
+        .filter((file) => !file.isFolder && file.name.toLowerCase().endsWith(".xml"))
+        .map((file) => file.key)
+      const nestedFolders = files.filter((file) => file.isFolder)
+      const nestedResults = await Promise.all(
+        nestedFolders.map((folder) => collectXmlFiles(folder.key))
+      )
+
+      return [...xmlFiles, ...nestedResults.flat()]
+    }
+
+    void (async () => {
+      try {
+        const xmlFiles = (await collectXmlFiles("gamedata")).toSorted(
+          (left, right) =>
+            left.localeCompare(right, undefined, { sensitivity: "base" })
+        )
+        if (!cancelled) {
+          setGamedataXmlFiles(xmlFiles)
+        }
+      } catch {
+        if (!cancelled) {
+          setGamedataXmlFiles([])
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [itemsEditorTarget])
 
   function applyAdminData(nextData: AdminPageData) {
     adminDataCacheRef.current.set(nextData.currentPath, nextData)
@@ -1048,11 +1093,32 @@ function AdminPageContent() {
     })
 
     return {
-      storedPath:
-        normalizedFolder === "game"
-          ? file.name
-          : uploadTarget.key.replace(/^cache\/+/, ""),
+      storedPath: uploadTarget.key.replace(/^cache\/+/, ""),
       hash: uploadedHash,
+    }
+  }
+
+  async function handleSelectExistingRendererFile(key: string) {
+    const normalizedKey = normalizePath(key)
+    const publicUrl = buildPublicFileUrl(normalizedKey)
+    const privateUrl = `/api/admin/download?key=${encodeURIComponent(normalizedKey)}`
+
+    let response = publicUrl
+      ? await fetch(publicUrl, { cache: "no-store" })
+      : null
+
+    if (!response?.ok) {
+      response = await fetch(privateUrl, { cache: "no-store" })
+    }
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch renderer XML")
+    }
+
+    const buffer = new Uint8Array(await response.arrayBuffer())
+    return {
+      storedPath: normalizedKey,
+      hash: protonHash(buffer),
     }
   }
 
@@ -1450,6 +1516,8 @@ function AdminPageContent() {
                   allowFileLoad={false}
                   saveLabel="Save to cache"
                   assetFolderOptions={["game", "interface", "audio", "images"]}
+                  rendererFileOptions={gamedataXmlFiles}
+                  onSelectExistingRendererFile={handleSelectExistingRendererFile}
                   onAssetUpload={handleUploadEditorAsset}
                   onSave={handleSaveItemsEditor}
                 />
